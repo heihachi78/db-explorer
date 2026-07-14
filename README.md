@@ -1,6 +1,6 @@
 # Oracle Graph Analyzer
 
-Helyben futó, egyfelhasználós alkalmazás Oracle adatbázis-objektumok és kapcsolataik feltérképezésére. A jelenlegi első mérföldkő az alkalmazásvázat, a helyi SQLite-tárolást és a read-only Oracle kapcsolatpróbát valósítja meg.
+Helyben futó, egyfelhasználós alkalmazás Oracle adatbázis-objektumok és kapcsolataik feltérképezésére. Az alkalmazás read-only Oracle kapcsolatból több kiválasztott sémát olvas be, majd a normalizált forrásgráfot egy helyi SQLite-fájlba publikálja.
 
 ## Gyors indítás
 
@@ -23,9 +23,9 @@ Helyben futó, egyfelhasználós alkalmazás Oracle adatbázis-objektumok és ka
    az adatbázis közös Docker-hálózaton fut, ezért az Oracle DSN gépneve
    `ora-db` legyen.
 
-4. Nyisd meg a [http://localhost:8000](http://localhost:8000) címet, majd futtasd a kapcsolatpróbát.
+4. Nyisd meg a [http://localhost:8000](http://localhost:8000) címet, futtasd a kapcsolatpróbát, válaszd ki a sémákat, majd indítsd el az adatgyűjtést.
 
-Az aktuális munkafájl a host `data/oracle_graph.db` fájlja. A jelszó nem kerül bele az adatbázisba és API-válaszba.
+Az aktuális munkafájl a host `data/oracle_graph.db` fájlja. A scanner futás közben külön `oracle_graph.next.db` fájlt épít, és csak sikeres integritásellenőrzés után cseréli le atomikusan az aktuális adatot. A jelszó nem kerül bele az adatbázisba és API-válaszba.
 
 ## Helyi fejlesztés
 
@@ -47,7 +47,14 @@ npm run dev
 
 A Vite fejlesztői szerver a `/api` hívásokat a `localhost:8000` backendhez továbbítja.
 
-## Elkészült ebben a mérföldkőben
+Tesztek:
+
+```bash
+.venv/bin/pytest -q backend/tests
+cd frontend && npm test -- --run && npm run build
+```
+
+## Elkészült
 
 - FastAPI alkalmazás egységes JSON hibaformával;
 - érzékeny adatokat nem publikáló környezeti konfiguráció;
@@ -55,11 +62,16 @@ A Vite fejlesztői szerver a `/api` hívásokat a `localhost:8000` backendhez to
 - a teljes tervezett SQLite-séma kötelező indexekkel és WAL móddal;
 - SQLite `integrity_check` és atomikus `.next.db` publikálási primitív;
 - egyetlen párhuzamos hosszú műveletet engedő, megszakítható task manager;
-- React/TypeScript kapcsolat- és állapotképernyő;
+- többsémás `ALL_OBJECTS` objektumkinyerés, stabil owner- és container-érzékeny azonosítókkal;
+- `ALL_DEPENDENCIES`, összetett FK, trigger, index, helyi és releváns `PUBLIC` synonym kapcsolatok;
+- külső és távoli célok placeholder node-jai, determinisztikus élek és külön evidence-rekordok;
+- scan lefedettségi összesítő owner-, objektumtípus- és kapcsolattípus-számlálókkal;
+- megszakításbiztos staging pipeline, idegenkulcs- és endpoint-validálás, majd atomikus publikálás;
+- React/TypeScript kapcsolat-, sémaválasztó-, scanállapot- és összesítő képernyő;
 - egyszolgáltatásos Docker Compose futtatás, egy Uvicorn workerrel.
 
 ## Következő mérföldkő
 
-A többsémás scanner: `ALL_OBJECTS`, `ALL_DEPENDENCIES`, FK-k, triggerek, indexek és synonymok kinyerése, normalizálása és atomikus publikálása.
+A gráf API és böngésző: objektumkeresés, részgráfok, objektum- és edge-részletek, hatás- és útvonalelemzés. A scanner további finomítása során készül el a package spec/body elemzési összevonása és a korlátozott mélységű synonym-láncfeloldás.
 
 Részletes terv: [oracle-adatbazis-graf-megvalositasi-terv.md](oracle-adatbazis-graf-megvalositasi-terv.md)

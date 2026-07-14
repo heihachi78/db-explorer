@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class PublicConfig(BaseModel):
@@ -22,3 +22,11 @@ class ScanRequest(BaseModel):
     includeSourceCode: bool = False
     resolveExternalReferences: bool = True
     includeSchedulerObjects: bool = False
+
+    @field_validator("schemas", "objectTypes")
+    @classmethod
+    def clean_unique_values(cls, values: list[str]) -> list[str]:
+        cleaned = [value.strip() for value in values if value.strip()]
+        if len(cleaned) != len(set(cleaned)):
+            cleaned = list(dict.fromkeys(cleaned))
+        return cleaned

@@ -1,11 +1,26 @@
 import { useEffect, useState } from "react";
 
-import { ApiError, api, type Capabilities, type PublicConfig } from "./api/client";
+import {
+  ApiError,
+  api,
+  type Capabilities,
+  type PublicConfig,
+  type ScanStatus,
+  type ScanSummary,
+} from "./api/client";
 import { StatusPill } from "./components/StatusPill";
+
+const ACTIVE_SCAN_STATES = new Set([
+  "CONNECTING", "DISCOVERING_SCHEMAS", "EXTRACTING_OBJECTS",
+  "EXTRACTING_RELATIONSHIPS", "NORMALIZING", "VALIDATING", "PUBLISHING",
+]);
 
 function App() {
   const [config, setConfig] = useState<PublicConfig | null>(null);
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
+  const [selectedSchemas, setSelectedSchemas] = useState<string[]>([]);
+  const [scanStatus, setScanStatus] = useState<ScanStatus | null>(null);
+  const [scanSummary, setScanSummary] = useState<ScanSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -15,11 +30,43 @@ function App() {
     });
   }, []);
 
+  useEffect(() => {
+    let disposed = false;
+    let summaryLoaded = false;
+
+    async function poll() {
+      try {
+        const nextStatus = await api.scanStatus();
+        if (disposed) return;
+        setScanStatus(nextStatus);
+        if (ACTIVE_SCAN_STATES.has(nextStatus.state)) {
+          summaryLoaded = false;
+        } else if (!summaryLoaded) {
+          summaryLoaded = true;
+          setScanSummary(await api.scanSummary());
+        }
+      } catch {
+        // Configuration and connection actions surface server availability errors.
+      }
+    }
+
+    void poll();
+    const timer = setInterval(poll, 1000);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, []);
+
   async function testConnection() {
     setLoading(true);
     setError(null);
     try {
-      setCapabilities(await api.testConnection());
+      const nextCapabilities = await api.testConnection();
+      setCapabilities(nextCapabilities);
+      setSelectedSchemas((current) => current.filter(
+        (schema) => nextCapabilities.schemas.includes(schema),
+      ));
     } catch (reason) {
       if (reason instanceof ApiError) {
         const detailMessage = reason.details.oracleMessage ?? reason.details.networkMessage;
@@ -36,6 +83,43 @@ function App() {
       setLoading(false);
     }
   }
+
+  function toggleSchema(schema: string) {
+    setSelectedSchemas((current) => current.includes(schema)
+      ? current.filter((item) => item !== schema)
+      : [...current, schema]);
+  }
+
+  async function startScan() {
+    setLoading(true);
+    setError(null);
+    try {
+      await api.startScan(selectedSchemas);
+      setScanStatus(await api.scanStatus());
+    } catch (reason) {
+      setError(reason instanceof ApiError ? reason.message : "Az adatgyűjtés nem indítható el.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function cancelScan() {
+    try {
+      await api.cancelScan();
+      setScanStatus(await api.scanStatus());
+    } catch (reason) {
+      setError(reason instanceof ApiError ? reason.message : "Az adatgyűjtés nem szakítható meg.");
+    }
+  }
+
+  const scanActive = Boolean(scanStatus && ACTIVE_SCAN_STATES.has(scanStatus.state));
+  const scanSucceeded = scanStatus?.state === "SUCCEEDED";
+  const objectCount = scanSummary
+    ? Object.values(scanSummary.objectTypeCounts).reduce((total, count) => total + count, 0)
+    : 0;
+  const relationshipCount = scanSummary
+    ? Object.values(scanSummary.relationshipTypeCounts).reduce((total, count) => total + count, 0)
+    : 0;
 
   return (
     <div className="app-shell">
@@ -109,8 +193,15 @@ function App() {
                   <div><span>Látható sémák</span><strong>{capabilities.schemas.length}</strong></div>
                 </div>
                 <div className="schema-preview">
-                  <p>Első elérhető sémák</p>
-                  <div>{capabilities.schemas.slice(0, 12).map((schema) => <span key={schema}>{schema}</span>)}</div>
+                  <p>Válaszd ki a felmérendő sémákat</p>
+                  <div>{capabilities.schemas.map((schema) => (
+                    <button
+                      type="button"
+                      className={selectedSchemas.includes(schema) ? "selected" : ""}
+                      key={schema}
+                      onClick={() => toggleSchema(schema)}
+                    >{schema}</button>
+                  ))}</div>
                 </div>
                 {capabilities.warnings.length > 0 && <p className="warning">{capabilities.warnings.length} katalógusnézet nem olvasható.</p>}
               </>
@@ -118,11 +209,48 @@ function App() {
           </article>
         </section>
 
-        {error && <div className="error-banner" role="alert"><strong>Kapcsolati hiba</strong><span>{error}</span></div>}
+        {error && <div className="error-banner" role="alert"><strong>Műveleti hiba</strong><span>{error}</span></div>}
 
-        <section className="next-step">
-          <span>02</span><div><p>következő mérföldkő</p><h3>Többsémás metaadatgyűjtés</h3></div>
-          <p>Objektumok, függőségek, idegen kulcsok és bizonyítékok atomikus betöltése.</p>
+        <section className="scan-panel">
+          <div className="scan-heading">
+            <span className="scan-number">02</span>
+            <div><p className="overline">Metaadatgyűjtés</p><h3>Többsémás forrásgráf</h3></div>
+            <StatusPill ok={scanStatus?.state === "SUCCEEDED"}>
+              {scanStatus?.state ?? "IDLE"}
+            </StatusPill>
+          </div>
+          <div className="scan-actions">
+            <div><strong>{selectedSchemas.length}</strong><span>kiválasztott séma</span></div>
+            <button
+              className="primary-button"
+              onClick={startScan}
+              disabled={selectedSchemas.length === 0 || scanActive || loading}
+            >Adatgyűjtés indítása</button>
+            {scanActive && <button className="secondary-button" onClick={cancelScan}>Megszakítás</button>}
+          </div>
+          {scanStatus && scanStatus.state !== "IDLE" && (
+            <div className="scan-progress" aria-live="polite">
+              {!scanSucceeded && (
+                <div><span>{scanStatus.phase}</span><strong>{scanStatus.message}</strong></div>
+              )}
+              <progress
+                aria-label={scanSucceeded ? "Adatgyűjtés befejezve" : "Adatgyűjtés folyamatban"}
+                value={scanSucceeded
+                  ? 1
+                  : scanStatus.progress_total ? scanStatus.progress_current : undefined}
+                max={scanSucceeded ? 1 : scanStatus.progress_total ?? 1}
+              />
+              {scanStatus.error_message && <p className="warning">{scanStatus.error_message}</p>}
+            </div>
+          )}
+          {scanSummary && (
+            <div className="scan-summary">
+              <div><span>Objektum</span><strong>{objectCount.toLocaleString("hu-HU")}</strong></div>
+              <div><span>Kapcsolat</span><strong>{relationshipCount.toLocaleString("hu-HU")}</strong></div>
+              <div><span>Külső cél</span><strong>{scanSummary.externalObjectCount.toLocaleString("hu-HU")}</strong></div>
+              <div><span>Feldolgozott séma</span><strong>{scanSummary.selectedSchemas.length}</strong></div>
+            </div>
+          )}
         </section>
       </main>
     </div>

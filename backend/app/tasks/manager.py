@@ -60,10 +60,12 @@ class TaskManager:
         except asyncio.CancelledError:
             self.update(TaskState.CANCELLED, message="Operation cancelled.")
         except Exception as error:
+            error_code = error.code if isinstance(error, AppError) else type(error).__name__
+            error_message = error.message if isinstance(error, AppError) else str(error)
             self.update(
                 TaskState.FAILED,
-                error_code=type(error).__name__,
-                error_message=str(error),
+                error_code=error_code,
+                error_message=error_message,
                 message="Operation failed.",
             )
 
@@ -98,7 +100,11 @@ class TaskManager:
             if not self._task or self._task.done() or not self.active:
                 raise AppError("NO_ACTIVE_OPERATION", "There is no active operation.", status_code=409)
             self._task.cancel()
-            self.update(TaskState.CANCELLED, message="Operation cancelled.")
+            # If cancellation happens before _run gets its first timeslice,
+            # its CancelledError handler cannot persist the terminal state.
+            await asyncio.sleep(0)
+            if self._task.cancelled() and self.active:
+                self.update(TaskState.CANCELLED, message="Operation cancelled.")
 
     async def shutdown(self) -> None:
         if self._task and not self._task.done():
