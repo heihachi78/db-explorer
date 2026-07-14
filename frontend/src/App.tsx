@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
 import {
   ApiError,
@@ -9,6 +9,10 @@ import {
   type ScanSummary,
 } from "./api/client";
 import { StatusPill } from "./components/StatusPill";
+
+const GraphExplorer = lazy(() => import("./components/GraphExplorer").then(
+  (module) => ({ default: module.GraphExplorer }),
+));
 
 const ACTIVE_SCAN_STATES = new Set([
   "CONNECTING", "DISCOVERING_SCHEMAS", "EXTRACTING_OBJECTS",
@@ -252,6 +256,9 @@ function App() {
             </div>
           )}
         </section>
+        <Suspense fallback={<div className="explorer-loading">Gráfböngésző betöltése…</div>}>
+          <GraphExplorer />
+        </Suspense>
       </main>
     </div>
   );

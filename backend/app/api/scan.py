@@ -22,7 +22,8 @@ async def cancel_scan(request: Request) -> dict[str, bool]:
     return {"accepted": True}
 
 
-@router.get("/summary")
+@router.get("/statistics")
+@router.get("/summary", include_in_schema=False)
 def get_scan_summary(request: Request) -> dict:
     summary = load_scan_summary(request.app.state.settings.database_path)
     return {"available": summary is not None, "summary": summary}

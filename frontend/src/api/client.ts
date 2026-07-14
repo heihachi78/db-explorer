@@ -45,6 +45,69 @@ export interface ScanSummary {
   warnings: string[];
 }
 
+export interface GraphNode {
+  id: string;
+  owner: string;
+  name: string;
+  objectType: string;
+  oracleObjectType: string;
+  status: string | null;
+  isExternal: boolean;
+  metadata: Record<string, unknown>;
+  depth?: number;
+}
+
+export interface GraphEvidence {
+  sourceView: string;
+  details: Record<string, unknown>;
+}
+
+export interface GraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  relationshipType: string;
+  directed: boolean;
+  confidence: number;
+  origin: string;
+  metadata: Record<string, unknown>;
+  evidence: GraphEvidence[];
+}
+
+export interface ObjectSearchResult {
+  items: GraphNode[];
+  total: number;
+  page: number;
+  pageSize: number;
+  facets: {
+    owners: Record<string, number>;
+    objectTypes: Record<string, number>;
+    statuses: Record<string, number>;
+  };
+}
+
+export interface SubgraphResult {
+  rootObjectIds: string[];
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  truncated: boolean;
+  suggestion: string | null;
+}
+
+export interface PathResult {
+  sourceId: string;
+  targetId: string;
+  mode: "HOPS" | "WEIGHTED";
+  directed: boolean;
+  paths: Array<{
+    nodes: GraphNode[];
+    edges: GraphEdge[];
+    hops: number;
+    totalCost: number;
+  }>;
+  truncated: boolean;
+}
+
 interface ApiErrorBody {
   code?: string;
   message?: string;
@@ -98,4 +161,42 @@ export const api = {
     body: JSON.stringify({ schemas }),
   }),
   cancelScan: () => request<{ accepted: boolean }>("/scan/cancel", { method: "POST" }),
+  searchObjects: (parameters: {
+    q?: string;
+    owner?: string;
+    objectType?: string;
+    pageSize?: number;
+  }) => {
+    const query = new URLSearchParams();
+    Object.entries(parameters).forEach(([key, value]) => {
+      if (value !== undefined && value !== "") query.set(key, String(value));
+    });
+    return request<ObjectSearchResult>(`/objects?${query}`);
+  },
+  subgraph: (payload: {
+    rootObjectIds: string[];
+    depth: number;
+    direction: "INCOMING" | "OUTGOING" | "BOTH";
+  }) => request<SubgraphResult>("/subgraph", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }),
+  impact: (payload: {
+    objectId: string;
+    mode: "DEPENDENTS" | "DEPENDENCIES";
+    maxDepth?: number;
+  }) => request<SubgraphResult>("/impact", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }),
+  paths: (payload: {
+    sourceId: string;
+    targetId: string;
+    mode: "HOPS" | "WEIGHTED";
+    directed: boolean;
+    maxPaths: number;
+  }) => request<PathResult>("/paths", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }),
 };

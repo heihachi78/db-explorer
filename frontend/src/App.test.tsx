@@ -1,9 +1,12 @@
-import { render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 
 import App from "./App";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 test("shows the configured Oracle connection", async () => {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
@@ -98,4 +101,51 @@ test("shows a static completed progress bar without stale phase labels", async (
   expect(progress).toHaveAttribute("max", "1");
   expect(screen.queryByText("PUBLISHING")).not.toBeInTheDocument();
   expect(screen.queryByText("Operation completed.")).not.toBeInTheDocument();
+});
+
+test("searches graph objects without loading the full graph", async () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input);
+    const body = url.includes("/objects?") ? {
+      items: [{
+        id: "db::pdb::SALES::TABLE::ORDERS",
+        owner: "SALES",
+        name: "ORDERS",
+        objectType: "TABLE",
+        oracleObjectType: "TABLE",
+        status: "VALID",
+        isExternal: false,
+        metadata: {},
+      }],
+      total: 1,
+      page: 1,
+      pageSize: 30,
+      facets: { owners: { SALES: 1 }, objectTypes: { TABLE: 1 }, statuses: { VALID: 1 } },
+    } : url.endsWith("/scan/status") ? {
+      state: "IDLE", phase: null, progress_current: 0, progress_total: null,
+      message: null, error_code: null, error_message: null, counters: {},
+      started_at: null, finished_at: null,
+    } : url.endsWith("/scan/summary") ? { available: false, summary: null } : {
+      oracleConfigured: true,
+      oracleMode: "thin",
+      dataFilePresent: true,
+      activeOperation: false,
+      limits: {},
+    };
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+
+  render(<App />);
+  fireEvent.change(screen.getByPlaceholderText("például ORDER*"), { target: { value: "ORDER*" } });
+  fireEvent.click(screen.getByRole("button", { name: "Keresés" }));
+
+  expect(await screen.findByText("SALES.ORDERS")).toBeInTheDocument();
+  expect(screen.getByText("TABLE")).toBeInTheDocument();
+  expect(globalThis.fetch).toHaveBeenCalledWith(
+    expect.stringContaining("/api/objects?q=ORDER*&pageSize=30"),
+    expect.any(Object),
+  );
 });

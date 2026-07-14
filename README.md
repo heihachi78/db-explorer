@@ -68,10 +68,14 @@ cd frontend && npm test -- --run && npm run build
 - scan lefedettségi összesítő owner-, objektumtípus- és kapcsolattípus-számlálókkal;
 - megszakításbiztos staging pipeline, idegenkulcs- és endpoint-validálás, majd atomikus publikálás;
 - React/TypeScript kapcsolat-, sémaválasztó-, scanállapot- és összesítő képernyő;
+- facettált objektumkereső, objektum- és kapcsolatrészlet API evidence adatokkal;
+- irány-, kapcsolattípus- és confidence-szűrt, szerveroldalon limitált részgráf API;
+- ciklusbiztos dependents/dependencies hatáselemzés és hopszám- vagy súlyalapú útvonalkeresés;
+- Cytoscape gráfböngésző node/edge detail panellel, impact- és útvonalindítással;
 - egyszolgáltatásos Docker Compose futtatás, egy Uvicorn workerrel.
 
 ## Következő mérföldkő
 
-A gráf API és böngésző: objektumkeresés, részgráfok, objektum- és edge-részletek, hatás- és útvonalelemzés. A scanner további finomítása során készül el a package spec/body elemzési összevonása és a korlátozott mélységű synonym-láncfeloldás.
+Az elemzési pipeline: technikai node policy, package spec/body elemzési összevonás, súlyozás, confidence és párhuzamos edge aggregáció, hubkezelés, szimmetrizálás, majd reprodukálható Leiden-futtatások és közösségmutatók. A scanner további finomítása során készül el a korlátozott mélységű synonym-láncfeloldás; a gráfböngészőben pedig bővülnek az interaktív kapcsolat- és confidence-szűrők.
 
 Részletes terv: [oracle-adatbazis-graf-megvalositasi-terv.md](oracle-adatbazis-graf-megvalositasi-terv.md)

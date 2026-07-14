@@ -1,6 +1,8 @@
 from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 
@@ -29,5 +31,16 @@ def install_error_handlers(app: FastAPI) -> None:
                 "code": error.code,
                 "message": error.message,
                 "details": error.details,
+            },
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def handle_validation_error(_: Request, error: RequestValidationError) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "code": "VALIDATION_ERROR",
+                "message": "A kérés egy vagy több paramétere érvénytelen.",
+                "details": {"errors": jsonable_encoder(error.errors())},
             },
         )
