@@ -87,8 +87,10 @@ cd frontend && npm test -- --run && npm run build
 - ötfutásos seed-stabilitásprofil Adjusted Rand Index, NMI, Variation of Information, node-szintű együttklaszterezési stabilitás és dokumentált közösségcímkék számításával;
 - automatikus közösségnév-javaslat domináns séma, névtokenek és központi TABLE/PACKAGE alapján, magyarázattal és helyi elemzői annotációval;
 - interaktív, összecsukott community map, schema–community mátrix, conductance-rangsor, top hub/bridge és „Miért került ide?” nézet;
+- kísérleti hierarchikus közösségelemzés alacsony alap-resolutionnel, méretküszöb feletti rekurzív újrafelosztással, determinisztikus szülő–gyermek útvonalakkal, szülőnkénti resolution-felülírással, mélység- és közösségszám-limittel;
+- perzisztált, összecsukható hierarchiafa helyi közösségmutatókkal és objektum-drill-downnal; a levéltagság egyszer tárolódik, a szülők tartalma leszármazotti lekérdezéssel áll elő;
 - kijelölt futások összehasonlító táblája és resolution-görbéje, valamint címkefüggetlen particionálási egyezésmutatók;
-- determinisztikus JSON, CSV-csomag, SVG és PNG elemzésexport, státusz- és letöltési API-val, árva fájlok automatikus takarításával;
+- determinisztikus JSON, CSV-csomag, SVG és PNG elemzésexport, hierarchikus futásnál külön fa- és levéltagság-táblákkal, státusz- és letöltési API-val, árva fájlok automatikus takarításával;
 - egyszolgáltatásos Docker Compose futtatás, egy Uvicorn workerrel.
 
 ## Elemzői munkafolyamat
@@ -96,13 +98,14 @@ cd frontend && npm test -- --run && npm run build
 1. Indíts egy önálló Leiden-futást, egy hatpontos resolution-profilt vagy az öt seedből álló stabilitásprofilt.
 2. Jelölj ki legalább két sikeres futást a futáslistában, majd hasonlítsd össze a paramétereket, a közösségszámot, quality/conductance értékeket, valamint az ARI/NMI/VI egyezést.
 3. Nyiss meg egy futást, és használd a community mapet, a schema–community mátrixot és a legjobb/legrosszabb conductance listát. A közösségre kattintva megjelenik a névjavaslat indoklása, a top hubok és bridge-ek.
-4. A javasolt nevet helyi címkével és elemzői megjegyzéssel írhatod felül. Ezek az aktuális SQLite-adathalmazhoz tartoznak, új scan után nem öröklődnek tovább.
-5. A JSON export a konfigurációt, node-okat, kapcsolatokat, tagságokat és mutatókat együtt tartalmazza; a CSV ZIP külön táblákat ad, a futásexport SVG/PNG formátuma determinisztikus aggregált közösségi térképet készít. A gráfok saját „Aktuális nézet” gombjai ezzel szemben pontosan a pillanatnyi interaktív pan/zoomot és node-pozíciókat mentik.
+4. A „Kísérleti hierarchia” beállításaiban alacsony alap-resolutionnel indíthatsz rekurzív felosztást. A ponttal tagolt útvonalakhoz (`0`, `0.2`) külön resolution adható; a mélység- és közösségszám-limit védi a futást a túlzott felbontástól. Az eredményfa ágainak helyi mutatói és objektumai külön megnyithatók.
+5. A javasolt nevet helyi címkével és elemzői megjegyzéssel írhatod felül. Ezek az aktuális SQLite-adathalmazhoz tartoznak, új scan után nem öröklődnek tovább.
+6. A JSON export a konfigurációt, node-okat, kapcsolatokat, tagságokat és mutatókat együtt tartalmazza; a CSV ZIP külön táblákat ad, hierarchikus futásnál `hierarchy.csv` és `hierarchy_memberships.csv` fájlokkal. A futásexport SVG/PNG formátuma determinisztikus aggregált közösségi térképet készít. A gráfok saját „Aktuális nézet” gombjai ezzel szemben pontosan a pillanatnyi interaktív pan/zoomot és node-pozíciókat mentik.
 
 A stabilitási címke alapértelmezett küszöbei: `STABLE ≥ 0,80`, `MIXED ≥ 0,55`, ez alatt `UNSTABLE`. A node-pontszám legfeljebb tíz, az elemzési gráfban megmaradó fő szomszéddal való együttklaszterezés gyakorisága a seed-futások között.
 
 ## Következő mérföldkő
 
-Az 5. fázis fennmaradó validációs és hardening feladatai következnek: a becslési memóriaformula valós Oracle-adathalmazokon történő kalibrálása, golden Oracle séma és szélesebb algoritmusregresszió, Docker Compose tiszta-adatkönyvtár próba, valamint a felhasználói elfogadási forgatókönyv. A funkcionális tervből még hátravan a kísérleti hierarchikus közösségelemzés.
+Az 5. fázis fennmaradó validációs és hardening feladatai következnek: a becslési memóriaformula valós Oracle-adathalmazokon történő kalibrálása, golden Oracle séma és szélesebb algoritmusregresszió, Docker Compose tiszta-adatkönyvtár próba, valamint a reprezentatív Oracle-adatbázison végrehajtott felhasználói elfogadási forgatókönyv. A részletes terv funkcionális elemei elkészültek; a felmérésre kész állapot igazolásához ezek a környezeti és elfogadási próbák szükségesek.
 
 Részletes terv: [oracle-adatbazis-graf-megvalositasi-terv.md](oracle-adatbazis-graf-megvalositasi-terv.md)

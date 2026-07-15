@@ -126,6 +126,20 @@ class ExportService:
                 ["object_id", "metric", "value", "metadata_json"],
                 [[item["objectId"], item["metric"], item["value"], json.dumps(item["metadata"], ensure_ascii=False, sort_keys=True, separators=(",", ":"))] for item in snapshot["centrality"]],
             ))
+            if snapshot["analysis"]["config"].get("hierarchyEnabled"):
+                _zip_entry(archive, "hierarchy.csv", _csv_text(
+                    ["hierarchy_id", "parent_id", "level", "resolution", "split_resolution", "split_quality", "node_count", "stop_reason", "metrics_json"],
+                    [[
+                        item["hierarchyId"], item["parentId"], item["level"],
+                        item["resolution"], item["splitResolution"], item["splitQuality"],
+                        item["nodeCount"], item["stopReason"],
+                        json.dumps(item["metrics"], ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                    ] for item in snapshot["hierarchyNodes"]],
+                ))
+                _zip_entry(archive, "hierarchy_memberships.csv", _csv_text(
+                    ["hierarchy_id", "object_id"],
+                    [[item["hierarchyId"], item["objectId"]] for item in snapshot["hierarchyMemberships"]],
+                ))
             _zip_entry(archive, "analysis.json", json.dumps(snapshot["analysis"], ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n")
 
     def _write_png(self, path: Path, snapshot: dict[str, Any]) -> None:

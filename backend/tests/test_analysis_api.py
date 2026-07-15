@@ -128,6 +128,93 @@ def test_analysis_estimate_and_preflight_limit_rejection(tmp_path: Path) -> None
     assert runs == []
 
 
+def test_experimental_hierarchy_is_persisted_and_queryable(tmp_path: Path) -> None:
+    settings = Settings(app_data_dir=tmp_path)
+    _seed_two_communities(settings.database_path)
+
+    with TestClient(create_app(settings)) as client:
+        started = client.post("/api/analyses/hierarchy", json={
+            "name": "Domain hierarchy", "resolution": 0.01,
+            "minimumConfidence": 0, "hubPolicy": "NONE",
+            "hierarchyChildResolution": 4,
+            "hierarchyMinimumSize": 2, "hierarchyMaxDepth": 1,
+            "hierarchyResolutionOverrides": {"0": 4.5, "99": 2},
+        })
+        assert started.status_code == 202
+        analysis_id = started.json()["analysisId"]
+        run = _wait_for_analysis(client, analysis_id)
+        hierarchy = client.get(f"/api/analyses/{analysis_id}/hierarchy")
+        root_id = hierarchy.json()["roots"][0]["hierarchyId"]
+        detail = client.get(f"/api/analyses/{analysis_id}/hierarchy/{root_id}")
+        json_export = client.post("/api/export", json={
+            "analysisId": analysis_id, "format": "JSON",
+        })
+        json_job = _wait_for_export(client, json_export.json()["exportId"])
+        json_payload = client.get(json_job["downloadUrl"]).json()
+        csv_export = client.post("/api/export", json={
+            "analysisId": analysis_id, "format": "CSV",
+        })
+        csv_job = _wait_for_export(client, csv_export.json()["exportId"])
+        csv_payload = client.get(csv_job["downloadUrl"]).content
+        invalid = client.post("/api/analyses/hierarchy", json={
+            "hierarchyResolutionOverrides": {"invalid-path": 2},
+        })
+
+    assert run["status"] == "SUCCEEDED", run["errorMessage"]
+    assert run["config"]["hierarchyEnabled"] is True
+    assert run["summary"]["hierarchy"]["experimental"] is True
+    assert hierarchy.status_code == 200
+    assert hierarchy.json()["summary"]["maximumDepthReached"] == 1
+    assert hierarchy.json()["summary"]["unusedResolutionOverrideIds"] == ["99"]
+    assert hierarchy.json()["roots"][0]["childrenCount"] > 0
+    assert detail.status_code == 200
+    assert detail.json()["nodeCount"] == len(detail.json()["objects"])
+    assert json_payload["hierarchyNodes"]
+    assert len(json_payload["hierarchyMemberships"]) == 6
+    with zipfile.ZipFile(BytesIO(csv_payload)) as archive:
+        assert "hierarchy.csv" in archive.namelist()
+        assert "hierarchy_memberships.csv" in archive.namelist()
+    assert invalid.status_code == 422
+    assert invalid.json()["code"] == "VALIDATION_ERROR"
+
+
+def test_hierarchy_exposes_an_empty_tree_for_an_isolated_graph(tmp_path: Path) -> None:
+    settings = Settings(app_data_dir=tmp_path)
+    initialize_database(settings.database_path)
+    with sqlite3.connect(settings.database_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO objects (
+                id, database_key, container_key, owner, name, object_type,
+                oracle_object_type, status, is_external, metadata_json
+            ) VALUES ('isolated', 'db', 'pdb', 'APP', 'ISOLATED',
+                      'TABLE', 'TABLE', 'VALID', 0, '{}')
+            """
+        )
+        connection.commit()
+
+    with TestClient(create_app(settings)) as client:
+        started = client.post("/api/analyses/hierarchy", json={
+            "minimumConfidence": 0, "hubPolicy": "NONE",
+        })
+        analysis_id = started.json()["analysisId"]
+        run = _wait_for_analysis(client, analysis_id)
+        hierarchy = client.get(f"/api/analyses/{analysis_id}/hierarchy")
+        csv_export = client.post("/api/export", json={
+            "analysisId": analysis_id, "format": "CSV",
+        })
+        csv_job = _wait_for_export(client, csv_export.json()["exportId"])
+        csv_payload = client.get(csv_job["downloadUrl"]).content
+
+    assert run["status"] == "SUCCEEDED", run["errorMessage"]
+    assert hierarchy.status_code == 200
+    assert hierarchy.json()["roots"] == []
+    assert hierarchy.json()["summary"]["hierarchyNodeCount"] == 0
+    with zipfile.ZipFile(BytesIO(csv_payload)) as archive:
+        assert "hierarchy.csv" in archive.namelist()
+        assert "hierarchy_memberships.csv" in archive.namelist()
+
+
 def test_analysis_service_translates_memory_exhaustion(tmp_path: Path) -> None:
     settings = Settings(app_data_dir=tmp_path)
     _seed_two_communities(settings.database_path)

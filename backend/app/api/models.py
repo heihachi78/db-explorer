@@ -188,6 +188,30 @@ class SeedProfileRequest(AnalysisRequest):
         return cleaned
 
 
+class HierarchyAnalysisRequest(AnalysisRequest):
+    resolution: float = Field(default=0.2, gt=0, le=100)
+    hierarchyChildResolution: float = Field(default=1.0, gt=0, le=100)
+    hierarchyMinimumSize: int = Field(default=20, ge=2, le=100_000)
+    hierarchyMaxDepth: int = Field(default=3, ge=1, le=5)
+    hierarchyMaxCommunities: int = Field(default=10_000, ge=2, le=100_000)
+    hierarchyResolutionOverrides: dict[str, float] = Field(default_factory=dict)
+
+    @field_validator("hierarchyResolutionOverrides")
+    @classmethod
+    def valid_hierarchy_overrides(cls, values: dict[str, float]) -> dict[str, float]:
+        if len(values) > 100:
+            raise ValueError("Legfeljebb 100 közösségi resolution-felülírás adható meg.")
+        cleaned: dict[str, float] = {}
+        for hierarchy_id, resolution in values.items():
+            normalized_id = hierarchy_id.strip()
+            if not normalized_id or any(not part.isdigit() for part in normalized_id.split(".")):
+                raise ValueError("A hierarchy override kulcsa ponttal tagolt numerikus útvonal legyen.")
+            if resolution <= 0 or resolution > 100:
+                raise ValueError("A hierarchy resolution értéke 0 és 100 között legyen.")
+            cleaned[normalized_id] = float(resolution)
+        return cleaned
+
+
 class AnnotationRequest(BaseModel):
     analysisId: str = Field(min_length=1)
     communityId: int = Field(ge=0)

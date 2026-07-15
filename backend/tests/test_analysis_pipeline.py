@@ -1,10 +1,12 @@
 import math
+from dataclasses import replace
 
 import pytest
 
 from app.analysis.communities import create_undirected_igraph, detect_communities
 from app.analysis.comparison import adjusted_rand_index, compare_memberships, information_scores
 from app.analysis.metrics import assemble_result
+from app.analysis.hierarchy import build_hierarchy
 from app.analysis.models import AnalysisConfig
 from app.analysis.preprocessing import build_analysis_graph
 from app.graph.models import GraphEdge, GraphNode
@@ -187,3 +189,55 @@ def test_community_name_suggestion_uses_schema_tokens_and_central_table() -> Non
 
     assert metrics["suggestedName"] == "SALES / ORDER"
     assert "központi TABLE: SALES.ORDER_HEADER" in metrics["nameExplanation"]
+
+
+def test_hierarchy_recursively_splits_large_communities_with_parent_override() -> None:
+    nodes = [node(value, owner="SALES" if value < "D" else "BILLING") for value in "ABCDEF"]
+    edges = [
+        edge("ab", "A", "B"), edge("ac", "A", "C"), edge("bc", "B", "C"),
+        edge("de", "D", "E"), edge("df", "D", "F"), edge("ef", "E", "F"),
+        edge("bridge", "C", "D", "POINTS_TO", confidence=0.1),
+    ]
+    config = AnalysisConfig(
+        name="hierarchy", minimum_confidence=0, hub_policy="NONE",
+        resolution=0.01, hierarchy_enabled=True,
+        hierarchy_child_resolution=3.5, hierarchy_minimum_size=2,
+        hierarchy_max_depth=1, hierarchy_resolution_overrides={"0": 4.0},
+    )
+    graph = build_analysis_graph(nodes, edges, config)
+    membership, quality = detect_communities(graph, config)
+    base = assemble_result(graph, membership, quality, config, 0.01)
+
+    hierarchy_nodes, hierarchy_memberships, summary = build_hierarchy(
+        graph, membership, base.community_metrics, config, lambda: None,
+    )
+
+    assert summary["experimental"] is True
+    assert summary["rootCount"] == 1
+    assert summary["maximumDepthReached"] == 1
+    assert summary["resolutionOverrides"] == {"0": 4.0}
+    root = hierarchy_nodes[0]
+    children = [item for item in hierarchy_nodes if item["parentId"] == "0"]
+    assert root["splitResolution"] == 4.0
+    assert len(children) == 6
+    assert all(child["nodeCount"] == 1 for child in children)
+    assert all(child["stopReason"] == "MAX_DEPTH" for child in children)
+    assert {object_id for _hierarchy_id, object_id in hierarchy_memberships} == set("ABCDEF")
+    assert len(hierarchy_memberships) == 6
+
+    limited_nodes, limited_memberships, limited_summary = build_hierarchy(
+        graph, membership, base.community_metrics,
+        replace(config, hierarchy_max_communities=2), lambda: None,
+    )
+    assert len(limited_nodes) == 1
+    assert limited_nodes[0]["stopReason"] == "COMMUNITY_LIMIT"
+    assert len(limited_memberships) == 6
+    assert limited_summary["truncated"] is True
+
+    empty_nodes, empty_memberships, empty_summary = build_hierarchy(
+        graph, {node_id: -1 for node_id in graph.nodes}, {}, config, lambda: None,
+    )
+    assert empty_nodes == []
+    assert empty_memberships == []
+    assert empty_summary["rootCount"] == 0
+    assert empty_summary["hierarchyNodeCount"] == 0

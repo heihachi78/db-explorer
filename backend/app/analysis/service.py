@@ -8,6 +8,7 @@ from app.tasks.models import TaskState
 from app.errors import AppError
 
 from .communities import detect_communities
+from .hierarchy import build_hierarchy
 from .metrics import assemble_result
 from .models import AnalysisConfig
 from .preprocessing import build_analysis_graph
@@ -103,6 +104,22 @@ class AnalysisService:
         result = assemble_result(
             graph, membership, quality, config, time.perf_counter() - started
         )
+        if config.hierarchy_enabled:
+            report(
+                TaskState.DETECTING_COMMUNITIES,
+                message="Recursively splitting large communities for the experimental hierarchy.",
+                counters=graph.pipeline_counts,
+            )
+            hierarchy_nodes, hierarchy_memberships, hierarchy_summary = build_hierarchy(
+                graph,
+                membership,
+                result.community_metrics,
+                config,
+                lambda: self._check_cancelled(cancelled),
+            )
+            result.hierarchy_nodes = hierarchy_nodes
+            result.hierarchy_memberships = hierarchy_memberships
+            result.summary["hierarchy"] = hierarchy_summary
         result.summary["runtimeSeconds"] = round(time.perf_counter() - started, 12)
         self._check_cancelled(cancelled)
         report(TaskState.SAVING_RESULTS, message="Saving reproducible analysis results.")

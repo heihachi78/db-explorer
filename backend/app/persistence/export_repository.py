@@ -208,6 +208,21 @@ class ExportRepository:
                 """,
                 (analysis_id,),
             ).fetchall()
+            hierarchy_rows = connection.execute(
+                """
+                SELECT * FROM analysis_hierarchy
+                WHERE analysis_id = ? ORDER BY level, hierarchy_id
+                """,
+                (analysis_id,),
+            ).fetchall()
+            hierarchy_membership_rows = connection.execute(
+                """
+                SELECT hierarchy_id, object_id
+                FROM analysis_hierarchy_membership
+                WHERE analysis_id = ? ORDER BY hierarchy_id, object_id
+                """,
+                (analysis_id,),
+            ).fetchall()
         return {
             "analysis": {
                 "id": run["id"], "name": run["name"], "algorithm": run["algorithm"],
@@ -250,5 +265,23 @@ class ExportRepository:
                     "createdAt": row["created_at"], "updatedAt": row["updated_at"],
                 }
                 for row in annotation_rows
+            ],
+            "hierarchyNodes": [
+                {
+                    "hierarchyId": row["hierarchy_id"],
+                    "parentId": row["parent_id"],
+                    "level": row["level"],
+                    "resolution": row["resolution"],
+                    "splitResolution": row["split_resolution"],
+                    "splitQuality": row["split_quality"],
+                    "nodeCount": row["node_count"],
+                    "stopReason": row["stop_reason"],
+                    "metrics": json.loads(row["metrics_json"]),
+                }
+                for row in hierarchy_rows
+            ],
+            "hierarchyMemberships": [
+                {"hierarchyId": row["hierarchy_id"], "objectId": row["object_id"]}
+                for row in hierarchy_membership_rows
             ],
         }

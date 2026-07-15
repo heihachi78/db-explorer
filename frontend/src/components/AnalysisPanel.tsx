@@ -5,11 +5,14 @@ import {
   api,
   type AnalysisComparison,
   type AnalysisEstimate,
+  type AnalysisHierarchy,
   type AnalysisRun,
   type CommunityDetail,
   type CommunityGraph,
   type CommunityMetrics,
   type ExportJob,
+  type HierarchyNodeDetail,
+  type HierarchyTreeNode,
 } from "../api/client";
 import { CommunityGraphCanvas } from "./CommunityGraphCanvas";
 
@@ -52,12 +55,53 @@ function ComparisonChart({ comparison }: { comparison: AnalysisComparison }) {
   );
 }
 
+function HierarchyBranch({
+  node,
+  selectedId,
+  onSelect,
+}: {
+  node: HierarchyTreeNode;
+  selectedId?: string;
+  onSelect: (hierarchyId: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(node.level === 0);
+  return (
+    <li>
+      <div className="hierarchy-node-row">
+        <button
+          type="button"
+          className={selectedId === node.hierarchyId ? "selected" : ""}
+          onClick={() => onSelect(node.hierarchyId)}
+        >
+          <strong>{node.metrics.suggestedName}</strong>
+          <span>{node.nodeCount} node · szint {node.level} · r={node.resolution.toLocaleString("hu-HU", { maximumFractionDigits: 4 })}</span>
+          {node.stopReason && <small>{node.stopReason}</small>}
+        </button>
+        {node.children.length > 0 && <button
+          type="button"
+          className="hierarchy-expand"
+          aria-label={`${node.metrics.suggestedName} gyermekei ${expanded ? "elrejtése" : "megjelenítése"}`}
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+        >{expanded ? "−" : "+"}</button>}
+      </div>
+      {expanded && node.children.length > 0 && (
+        <ul>{node.children.map((child) => (
+          <HierarchyBranch key={child.hierarchyId} node={child} selectedId={selectedId} onSelect={onSelect} />
+        ))}</ul>
+      )}
+    </li>
+  );
+}
+
 export function AnalysisPanel({ operationActive = false }: { operationActive?: boolean }) {
   const [runs, setRuns] = useState<AnalysisRun[]>([]);
   const [selectedRun, setSelectedRun] = useState<AnalysisRun | null>(null);
   const [communities, setCommunities] = useState<CommunityMetrics[]>([]);
   const [communityGraph, setCommunityGraph] = useState<CommunityGraph | null>(null);
   const [communityDetail, setCommunityDetail] = useState<CommunityDetail | null>(null);
+  const [hierarchy, setHierarchy] = useState<AnalysisHierarchy | null>(null);
+  const [hierarchyDetail, setHierarchyDetail] = useState<HierarchyNodeDetail | null>(null);
   const [annotationName, setAnnotationName] = useState("");
   const [annotationNote, setAnnotationNote] = useState("");
   const [comparisonIds, setComparisonIds] = useState<string[]>([]);
@@ -70,6 +114,12 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
   const [minimumConfidence, setMinimumConfidence] = useState(0.8);
   const [hubPolicy, setHubPolicy] = useState<"NONE" | "DEGREE_NORMALIZATION" | "EXCLUDE_TOP_HUBS">("DEGREE_NORMALIZATION");
   const [includeTechnicalObjects, setIncludeTechnicalObjects] = useState(false);
+  const [hierarchyBaseResolution, setHierarchyBaseResolution] = useState(0.2);
+  const [hierarchyChildResolution, setHierarchyChildResolution] = useState(1.0);
+  const [hierarchyMinimumSize, setHierarchyMinimumSize] = useState(20);
+  const [hierarchyMaxDepth, setHierarchyMaxDepth] = useState(3);
+  const [hierarchyMaxCommunities, setHierarchyMaxCommunities] = useState(10_000);
+  const [hierarchyOverrides, setHierarchyOverrides] = useState("");
   const [estimate, setEstimate] = useState<AnalysisEstimate | null>(null);
   const [estimatePending, setEstimatePending] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -126,6 +176,7 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
         createdAt: new Date().toISOString(), startedAt: null, finishedAt: null,
       });
       setCommunities([]); setCommunityGraph(null); setCommunityDetail(null);
+      setHierarchy(null); setHierarchyDetail(null);
     } catch (reason) {
       setError(reason instanceof ApiError ? reason.message : "Az elemzés nem indítható el.");
     } finally { setBusy(false); }
@@ -139,21 +190,64 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
         : await api.startSeedProfile(analysisPayload());
       setComparisonIds(result.analysisIds);
       setSelectedRun(null); setCommunities([]); setCommunityGraph(null); setCommunityDetail(null);
+      setHierarchy(null); setHierarchyDetail(null);
       await refresh();
     } catch (reason) {
       setError(reason instanceof ApiError ? reason.message : "A profil nem indítható el.");
     } finally { setBusy(false); }
   }
 
+  function parsedHierarchyOverrides() {
+    const result: Record<string, number> = {};
+    for (const item of hierarchyOverrides.split(",").map((value) => value.trim()).filter(Boolean)) {
+      const [hierarchyId, rawResolution, ...extra] = item.split("=").map((value) => value.trim());
+      const resolutionValue = Number(rawResolution);
+      if (extra.length || !hierarchyId || !rawResolution || !Number.isFinite(resolutionValue) || resolutionValue <= 0) {
+        throw new Error("A felülírás formátuma például: 0=1.5, 0.2=2.0");
+      }
+      result[hierarchyId] = resolutionValue;
+    }
+    return result;
+  }
+
+  async function startHierarchy() {
+    setBusy(true); setError(null); setComparison(null);
+    try {
+      const result = await api.startHierarchy({
+        ...analysisPayload(),
+        resolution: hierarchyBaseResolution,
+        hierarchyChildResolution,
+        hierarchyMinimumSize,
+        hierarchyMaxDepth,
+        hierarchyMaxCommunities,
+        hierarchyResolutionOverrides: parsedHierarchyOverrides(),
+      });
+      await refresh();
+      setSelectedRun({
+        id: result.analysisId, name, status: "QUEUED", algorithm: "LEIDEN",
+        config: { hierarchyEnabled: true }, summary: null, errorMessage: null,
+        createdAt: new Date().toISOString(), startedAt: null, finishedAt: null,
+      });
+      setCommunities([]); setCommunityGraph(null); setCommunityDetail(null);
+      setHierarchy(null); setHierarchyDetail(null);
+    } catch (reason) {
+      setError(reason instanceof ApiError || reason instanceof Error
+        ? reason.message : "A hierarchikus elemzés nem indítható el.");
+    } finally { setBusy(false); }
+  }
+
   async function inspect(run: AnalysisRun) {
-    setSelectedRun(run); setCommunityDetail(null); setExportJob(null); setError(null);
-    if (run.status !== "SUCCEEDED") { setCommunities([]); setCommunityGraph(null); return; }
+    setSelectedRun(run); setCommunityDetail(null); setHierarchyDetail(null); setExportJob(null); setError(null);
+    if (run.status !== "SUCCEEDED") {
+      setCommunities([]); setCommunityGraph(null); setHierarchy(null); return;
+    }
     setBusy(true);
     try {
-      const [nextCommunities, nextGraph] = await Promise.all([
+      const [nextCommunities, nextGraph, nextHierarchy] = await Promise.all([
         api.communities(run.id), api.communityGraph(run.id),
+        run.config.hierarchyEnabled ? api.hierarchy(run.id) : Promise.resolve(null),
       ]);
-      setCommunities(nextCommunities); setCommunityGraph(nextGraph);
+      setCommunities(nextCommunities); setCommunityGraph(nextGraph); setHierarchy(nextHierarchy);
     } catch (reason) {
       setError(reason instanceof ApiError ? reason.message : "A közösségek nem tölthetők be.");
     } finally { setBusy(false); }
@@ -169,6 +263,16 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
       setAnnotationNote(detail.annotation?.note ?? "");
     } catch (reason) {
       setError(reason instanceof ApiError ? reason.message : "A közösség nem tölthető be.");
+    } finally { setBusy(false); }
+  }, [selectedRun]);
+
+  const selectHierarchyNode = useCallback(async (hierarchyId: string) => {
+    if (!selectedRun) return;
+    setBusy(true); setError(null);
+    try {
+      setHierarchyDetail(await api.hierarchyNode(selectedRun.id, hierarchyId));
+    } catch (reason) {
+      setError(reason instanceof ApiError ? reason.message : "A hierarchikus közösség nem tölthető be.");
     } finally { setBusy(false); }
   }, [selectedRun]);
 
@@ -225,7 +329,10 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
   async function remove(run: AnalysisRun) {
     try {
       await api.deleteAnalysis(run.id);
-      if (selectedRun?.id === run.id) { setSelectedRun(null); setCommunities([]); setCommunityGraph(null); }
+      if (selectedRun?.id === run.id) {
+        setSelectedRun(null); setCommunities([]); setCommunityGraph(null);
+        setHierarchy(null); setHierarchyDetail(null);
+      }
       setComparisonIds((current) => current.filter((id) => id !== run.id));
       await refresh();
     } catch (reason) { setError(reason instanceof ApiError ? reason.message : "Az elemzés nem törölhető."); }
@@ -269,6 +376,21 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
               {estimate.warnings.map((warning) => <small key={warning}>{warning}</small>)}
             </>}
           </div>
+          <details className="hierarchy-config">
+            <summary>Kísérleti hierarchia beállításai</summary>
+            <p>Az alacsony alap-resolution nagy csoportokat keres, majd csak a méretküszöb feletti közösségeket bontja tovább.</p>
+            <div className="analysis-form-row">
+              <label>Alap resolution<input aria-label="Hierarchia alap resolution" type="number" min="0.01" max="100" step="0.05" value={hierarchyBaseResolution} onChange={(event) => setHierarchyBaseResolution(Number(event.target.value))} /></label>
+              <label>Gyermek resolution<input aria-label="Hierarchia gyermek resolution" type="number" min="0.01" max="100" step="0.1" value={hierarchyChildResolution} onChange={(event) => setHierarchyChildResolution(Number(event.target.value))} /></label>
+            </div>
+            <div className="analysis-form-row">
+              <label>Minimum méret<input aria-label="Hierarchia minimum méret" type="number" min="2" max="100000" value={hierarchyMinimumSize} onChange={(event) => setHierarchyMinimumSize(Number(event.target.value))} /></label>
+              <label>Max. mélység<input aria-label="Hierarchia maximum mélység" type="number" min="1" max="5" value={hierarchyMaxDepth} onChange={(event) => setHierarchyMaxDepth(Number(event.target.value))} /></label>
+            </div>
+            <label>Maximum közösség<input aria-label="Hierarchia maximum közösség" type="number" min="2" max="100000" value={hierarchyMaxCommunities} onChange={(event) => setHierarchyMaxCommunities(Number(event.target.value))} /></label>
+            <label>Szülőnkénti felülírás<input aria-label="Hierarchia resolution felülírások" value={hierarchyOverrides} onChange={(event) => setHierarchyOverrides(event.target.value)} placeholder="0=1.5, 0.2=2.0" /></label>
+            <button className="secondary-button analysis-profile-button" type="button" onClick={() => void startHierarchy()} disabled={busy || anyActive || operationActive || estimatePending || estimate?.withinLimits === false}>Kísérleti hierarchia indítása</button>
+          </details>
           <p className="parameter-hint">Az alapsúlyokat confidence és a választott hub policy korrigálja. Az alapértelmezett profil a logikai objektumokra optimalizált.</p>
           <button className="primary-button" disabled={busy || anyActive || operationActive || estimatePending || estimate?.withinLimits === false}>Elemzés indítása</button>
           <button className="secondary-button analysis-profile-button" type="button" onClick={() => void startProfile("resolution")} disabled={busy || anyActive || operationActive || estimatePending || estimate?.withinLimits === false}>6 pontos resolution profil</button>
@@ -343,6 +465,49 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
           </div>
           <div className="agreement-list">
             {comparison.agreement.pairwise.map((item) => <div key={`${item.leftAnalysisId}-${item.rightAnalysisId}`}><span>ARI <strong>{item.adjustedRandIndex.toFixed(3)}</strong></span><span>NMI <strong>{item.normalizedMutualInformation.toFixed(3)}</strong></span><span>VI <strong>{item.variationOfInformation.toFixed(3)}</strong></span></div>)}
+          </div>
+        </section>
+      )}
+
+      {selectedRun?.summary && hierarchy && (
+        <section className="analysis-insight hierarchy-workbench">
+          <div className="insight-heading">
+            <div><p className="overline">Kísérleti hierarchia</p><h4>Hierarchikus közösségtérkép</h4></div>
+            <span>{hierarchy.summary.hierarchyNodeCount} csoport · {hierarchy.summary.leafCount} levél · {hierarchy.summary.maximumDepthReached} szint</span>
+          </div>
+          <p className="analysis-warning">{hierarchy.summary.warning}</p>
+          {hierarchy.summary.truncated && <p className="analysis-warning">A hierarchia elérte a konfigurált {hierarchy.summary.maximumCommunities} közösséges limitet; egyes ágak levélként maradtak.</p>}
+          <div className="hierarchy-layout">
+            <ul className="hierarchy-tree">
+              {hierarchy.roots.length === 0 && (
+                <li className="muted-copy">Nincs felosztható közösség; a futás csak izolált vagy kizárt objektumokat talált.</li>
+              )}
+              {hierarchy.roots.map((root) => (
+                <HierarchyBranch
+                  key={root.hierarchyId}
+                  node={root}
+                  selectedId={hierarchyDetail?.hierarchyId}
+                  onSelect={(hierarchyId) => void selectHierarchyNode(hierarchyId)}
+                />
+              ))}
+            </ul>
+            <div className="hierarchy-detail">
+              {hierarchyDetail ? <>
+                <p className="overline">{hierarchyDetail.hierarchyId} útvonal</p>
+                <h4>{hierarchyDetail.metrics.suggestedName}</h4>
+                <p>{hierarchyDetail.metrics.nameExplanation}</p>
+                <dl>
+                  <div><dt>Node-ok</dt><dd>{hierarchyDetail.nodeCount}</dd></div>
+                  <div><dt>Resolution</dt><dd>{hierarchyDetail.resolution}</dd></div>
+                  <div><dt>Density</dt><dd>{hierarchyDetail.metrics.internalDensity.toFixed(3)}</dd></div>
+                  <div><dt>Conductance</dt><dd>{hierarchyDetail.metrics.conductance.toFixed(3)}</dd></div>
+                </dl>
+                <div className="hierarchy-objects">
+                  {hierarchyDetail.objects.slice(0, 50).map((object) => <code key={object.id}>{object.owner}.{object.name} · {object.objectType}</code>)}
+                  {hierarchyDetail.objects.length > 50 && <small>…és további {hierarchyDetail.objects.length - 50} objektum</small>}
+                </div>
+              </> : <p className="muted-copy">Válassz egy faelemet a közösség objektumainak és helyi mutatóinak megtekintéséhez.</p>}
+            </div>
           </div>
         </section>
       )}

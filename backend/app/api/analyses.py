@@ -18,6 +18,7 @@ from app.analysis.preprocessing import build_analysis_graph
 from app.api.models import (
     AnalysisCompareRequest,
     AnalysisRequest,
+    HierarchyAnalysisRequest,
     ResolutionProfileRequest,
     SeedProfileRequest,
 )
@@ -184,6 +185,21 @@ def estimate_analysis(payload: AnalysisRequest, request: Request) -> dict:
     return _estimate(_config(payload), request)
 
 
+@router.post("/hierarchy", status_code=status.HTTP_202_ACCEPTED)
+async def start_hierarchy(payload: HierarchyAnalysisRequest, request: Request) -> dict:
+    config = replace(
+        _config(payload),
+        hierarchy_enabled=True,
+        hierarchy_child_resolution=payload.hierarchyChildResolution,
+        hierarchy_minimum_size=payload.hierarchyMinimumSize,
+        hierarchy_max_depth=payload.hierarchyMaxDepth,
+        hierarchy_max_communities=payload.hierarchyMaxCommunities,
+        hierarchy_resolution_overrides=payload.hierarchyResolutionOverrides,
+    )
+    analysis_ids = await _start_configs([config], request)
+    return {"accepted": True, "analysisId": analysis_ids[0], "experimental": True}
+
+
 @router.post("/resolution-profile", status_code=status.HTTP_202_ACCEPTED)
 async def start_resolution_profile(payload: ResolutionProfileRequest, request: Request) -> dict:
     configs = []
@@ -325,3 +341,37 @@ def get_community_graph(analysis_id: str, request: Request) -> dict:
     if run["status"] != "SUCCEEDED":
         raise AppError("ANALYSIS_NOT_COMPLETE", "Az elemzés még nem fejeződött be.", status_code=409)
     return repository.community_graph(analysis_id)
+
+
+@router.get("/{analysis_id}/hierarchy")
+def get_hierarchy(analysis_id: str, request: Request) -> dict:
+    repository = _repository(request)
+    run = _require_run(repository, analysis_id)
+    if run["status"] != "SUCCEEDED":
+        raise AppError("ANALYSIS_NOT_COMPLETE", "Az elemzés még nem fejeződött be.", status_code=409)
+    hierarchy = repository.hierarchy(analysis_id)
+    if hierarchy is None:
+        raise AppError(
+            "HIERARCHY_NOT_AVAILABLE",
+            "Ehhez a futáshoz nem készült hierarchikus felosztás.",
+            status_code=404,
+            details={"analysisId": analysis_id},
+        )
+    return hierarchy
+
+
+@router.get("/{analysis_id}/hierarchy/{hierarchy_id}")
+def get_hierarchy_node(analysis_id: str, hierarchy_id: str, request: Request) -> dict:
+    repository = _repository(request)
+    run = _require_run(repository, analysis_id)
+    if run["status"] != "SUCCEEDED":
+        raise AppError("ANALYSIS_NOT_COMPLETE", "Az elemzés még nem fejeződött be.", status_code=409)
+    hierarchy_node = repository.hierarchy_node(analysis_id, hierarchy_id)
+    if hierarchy_node is None:
+        raise AppError(
+            "HIERARCHY_NODE_NOT_FOUND",
+            "A kért hierarchikus közösség nem található.",
+            status_code=404,
+            details={"analysisId": analysis_id, "hierarchyId": hierarchy_id},
+        )
+    return hierarchy_node

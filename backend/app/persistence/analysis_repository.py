@@ -124,6 +124,35 @@ class AnalysisRepository:
                         for row in result.centrality_results
                     ],
                 )
+                connection.executemany(
+                    """
+                    INSERT INTO analysis_hierarchy (
+                        analysis_id, hierarchy_id, parent_id, level, resolution,
+                        split_resolution, split_quality, node_count, stop_reason,
+                        metrics_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            analysis_id, node["hierarchyId"], node["parentId"],
+                            node["level"], node["resolution"], node["splitResolution"],
+                            node["splitQuality"], node["nodeCount"], node["stopReason"],
+                            _json(node["metrics"]),
+                        )
+                        for node in result.hierarchy_nodes
+                    ],
+                )
+                connection.executemany(
+                    """
+                    INSERT INTO analysis_hierarchy_membership (
+                        analysis_id, hierarchy_id, object_id
+                    ) VALUES (?, ?, ?)
+                    """,
+                    [
+                        (analysis_id, hierarchy_id, object_id)
+                        for hierarchy_id, object_id in result.hierarchy_memberships
+                    ],
+                )
                 cursor = connection.execute(
                     """
                     UPDATE analysis_runs
@@ -430,4 +459,85 @@ class AnalysisRepository:
                 }
                 for row in rows
             ],
+        }
+
+    @staticmethod
+    def _hierarchy_row(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "hierarchyId": row["hierarchy_id"],
+            "parentId": row["parent_id"],
+            "level": row["level"],
+            "resolution": row["resolution"],
+            "splitResolution": row["split_resolution"],
+            "splitQuality": row["split_quality"],
+            "nodeCount": row["node_count"],
+            "stopReason": row["stop_reason"],
+            "metrics": json.loads(row["metrics_json"]),
+        }
+
+    def hierarchy(self, analysis_id: str) -> dict[str, Any] | None:
+        with database(self.path, read_only=True) as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM analysis_hierarchy
+                WHERE analysis_id = ? ORDER BY level, hierarchy_id
+                """,
+                (analysis_id,),
+            ).fetchall()
+            run = connection.execute(
+                "SELECT result_summary_json FROM analysis_runs WHERE id = ?",
+                (analysis_id,),
+            ).fetchone()
+        summary = json.loads(run["result_summary_json"]) if run and run["result_summary_json"] else {}
+        hierarchy_summary = summary.get("hierarchy")
+        if not rows and hierarchy_summary is None:
+            return None
+        items = {
+            row["hierarchy_id"]: self._hierarchy_row(row) | {"children": []}
+            for row in rows
+        }
+        roots = []
+        for item in items.values():
+            parent_id = item["parentId"]
+            if parent_id is None:
+                roots.append(item)
+            else:
+                items[parent_id]["children"].append(item)
+        for item in items.values():
+            item["children"].sort(key=lambda child: child["hierarchyId"])
+            item["childrenCount"] = len(item["children"])
+        return {
+            "analysisId": analysis_id,
+            "experimental": True,
+            "summary": hierarchy_summary,
+            "roots": sorted(roots, key=lambda item: item["hierarchyId"]),
+        }
+
+    def hierarchy_node(self, analysis_id: str, hierarchy_id: str) -> dict[str, Any] | None:
+        with database(self.path, read_only=True) as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM analysis_hierarchy
+                WHERE analysis_id = ? AND hierarchy_id = ?
+                """,
+                (analysis_id, hierarchy_id),
+            ).fetchone()
+            if row is None:
+                return None
+            object_rows = connection.execute(
+                """
+                SELECT objects.*
+                FROM analysis_hierarchy_membership membership
+                JOIN objects ON objects.id = membership.object_id
+                WHERE membership.analysis_id = ?
+                  AND (
+                    membership.hierarchy_id = ?
+                    OR membership.hierarchy_id LIKE ?
+                  )
+                ORDER BY objects.owner, objects.name, objects.object_type, objects.id
+                """,
+                (analysis_id, hierarchy_id, f"{hierarchy_id}.%"),
+            ).fetchall()
+        return self._hierarchy_row(row) | {
+            "objects": [GraphNode.from_row(object_row).to_api() for object_row in object_rows]
         }

@@ -110,6 +110,31 @@ CREATE TABLE IF NOT EXISTS centrality_results (
     PRIMARY KEY (analysis_id, object_id, metric)
 );
 
+CREATE TABLE IF NOT EXISTS analysis_hierarchy (
+    analysis_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
+    hierarchy_id TEXT NOT NULL,
+    parent_id TEXT,
+    level INTEGER NOT NULL CHECK (level >= 0),
+    resolution REAL NOT NULL CHECK (resolution > 0),
+    split_resolution REAL,
+    split_quality REAL,
+    node_count INTEGER NOT NULL CHECK (node_count >= 1),
+    stop_reason TEXT,
+    metrics_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (analysis_id, hierarchy_id),
+    FOREIGN KEY (analysis_id, parent_id)
+        REFERENCES analysis_hierarchy(analysis_id, hierarchy_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS analysis_hierarchy_membership (
+    analysis_id TEXT NOT NULL,
+    hierarchy_id TEXT NOT NULL,
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    PRIMARY KEY (analysis_id, hierarchy_id, object_id),
+    FOREIGN KEY (analysis_id, hierarchy_id)
+        REFERENCES analysis_hierarchy(analysis_id, hierarchy_id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS annotations (
     id TEXT PRIMARY KEY,
     analysis_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
@@ -149,3 +174,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_annotations_community
     ON annotations(analysis_id, community_id);
 CREATE INDEX IF NOT EXISTS idx_export_jobs_analysis
     ON export_jobs(analysis_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_hierarchy_parent
+    ON analysis_hierarchy(analysis_id, parent_id, hierarchy_id);
+CREATE INDEX IF NOT EXISTS idx_hierarchy_membership_object
+    ON analysis_hierarchy_membership(analysis_id, object_id, hierarchy_id);

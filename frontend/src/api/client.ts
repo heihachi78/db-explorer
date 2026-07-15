@@ -217,6 +217,46 @@ export interface CommunityGraph {
   }>;
 }
 
+export interface HierarchyTreeNode {
+  hierarchyId: string;
+  parentId: string | null;
+  level: number;
+  resolution: number;
+  splitResolution: number | null;
+  splitQuality: number | null;
+  nodeCount: number;
+  stopReason: "MAX_DEPTH" | "MINIMUM_SIZE" | "NO_SPLIT" | "COMMUNITY_LIMIT" | null;
+  metrics: CommunityMetrics;
+  childrenCount: number;
+  children: HierarchyTreeNode[];
+}
+
+export interface AnalysisHierarchy {
+  analysisId: string;
+  experimental: true;
+  summary: {
+    baseResolution: number;
+    defaultChildResolution: number;
+    minimumSplitSize: number;
+    maximumDepth: number;
+    maximumCommunities: number;
+    rootCount: number;
+    hierarchyNodeCount: number;
+    leafCount: number;
+    maximumDepthReached: number;
+    resolutionOverrides: Record<string, number>;
+    unusedResolutionOverrideIds: string[];
+    leafMembershipCount: number;
+    truncated: boolean;
+    warning: string;
+  };
+  roots: HierarchyTreeNode[];
+}
+
+export interface HierarchyNodeDetail extends Omit<HierarchyTreeNode, "children" | "childrenCount"> {
+  objects: GraphNode[];
+}
+
 export interface PartitionAgreement {
   leftAnalysisId: string;
   rightAnalysisId: string;
@@ -398,6 +438,23 @@ export const api = {
     "/analyses/seed-profile",
     { method: "POST", body: JSON.stringify(payload) },
   ),
+  startHierarchy: (payload: {
+    name: string;
+    objective: "CPM" | "MODULARITY";
+    resolution: number;
+    seed: number;
+    minimumConfidence: number;
+    hubPolicy: "NONE" | "DEGREE_NORMALIZATION" | "EXCLUDE_TOP_HUBS";
+    includeTechnicalObjects: boolean;
+    hierarchyChildResolution: number;
+    hierarchyMinimumSize: number;
+    hierarchyMaxDepth: number;
+    hierarchyMaxCommunities: number;
+    hierarchyResolutionOverrides: Record<string, number>;
+  }) => request<{ accepted: boolean; analysisId: string; experimental: true }>(
+    "/analyses/hierarchy",
+    { method: "POST", body: JSON.stringify(payload) },
+  ),
   compareAnalyses: (analysisIds: string[]) => request<AnalysisComparison>(
     "/analyses/compare",
     { method: "POST", body: JSON.stringify({ analysisIds }) },
@@ -419,6 +476,12 @@ export const api = {
   ),
   communityGraph: (analysisId: string) => request<CommunityGraph>(
     `/analyses/${analysisId}/community-graph`,
+  ),
+  hierarchy: (analysisId: string) => request<AnalysisHierarchy>(
+    `/analyses/${analysisId}/hierarchy`,
+  ),
+  hierarchyNode: (analysisId: string, hierarchyId: string) => request<HierarchyNodeDetail>(
+    `/analyses/${analysisId}/hierarchy/${encodeURIComponent(hierarchyId)}`,
   ),
   saveAnnotation: (payload: {
     analysisId: string;

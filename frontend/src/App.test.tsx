@@ -396,3 +396,115 @@ test("disables analysis starts while a scan is active", async () => {
   expect(await screen.findByRole("button", { name: "Elemzés indítása" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "6 pontos resolution profil" })).toBeDisabled();
 });
+
+test("starts an experimental hierarchy with recursive parameters", async () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    const body = url.endsWith("/analyses/hierarchy") && method === "POST" ? {
+      accepted: true, analysisId: "hierarchy-1", experimental: true,
+    } : url.endsWith("/analyses/estimate") ? {
+      estimatedNodeCount: 100, estimatedRelationshipCount: 200,
+      sourceNodeCount: 100, sourceRelationshipCount: 200,
+      estimatedMemoryBytes: 128000, sizeCategory: "SMALL", withinLimits: true,
+      limits: { maxNodes: 500000, maxEdges: 5000000 }, warnings: [], approximate: true,
+    } : url.endsWith("/analyses") ? { items: [] }
+      : url.endsWith("/scan/status") ? {
+        state: "IDLE", phase: null, progress_current: 0, progress_total: null,
+        message: null, error_code: null, error_message: null, counters: {},
+        started_at: null, finished_at: null,
+      } : url.endsWith("/scan/summary") ? { available: false, summary: null }
+        : { oracleConfigured: true, oracleMode: "thin", dataFilePresent: true, activeOperation: false, limits: {} };
+    return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+  });
+
+  render(<App />);
+  expect(await screen.findByText("100 node · 200 kapcsolat")).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Kísérleti hierarchia beállításai"));
+  fireEvent.change(screen.getByLabelText("Hierarchia alap resolution"), { target: { value: "0.1" } });
+  fireEvent.change(screen.getByLabelText("Hierarchia gyermek resolution"), { target: { value: "1.5" } });
+  fireEvent.change(screen.getByLabelText("Hierarchia minimum méret"), { target: { value: "12" } });
+  fireEvent.change(screen.getByLabelText("Hierarchia maximum mélység"), { target: { value: "2" } });
+  fireEvent.change(screen.getByLabelText("Hierarchia maximum közösség"), { target: { value: "500" } });
+  fireEvent.change(screen.getByLabelText("Hierarchia resolution felülírások"), { target: { value: "0=2.5" } });
+  fireEvent.click(screen.getByRole("button", { name: "Kísérleti hierarchia indítása" }));
+
+  await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith(
+    "/api/analyses/hierarchy",
+    expect.objectContaining({
+      method: "POST",
+      body: expect.stringContaining('"hierarchyResolutionOverrides":{"0":2.5}'),
+    }),
+  ));
+  const call = vi.mocked(globalThis.fetch).mock.calls.find(([url]) => String(url).endsWith("/analyses/hierarchy"));
+  const payload = JSON.parse(String((call?.[1] as RequestInit).body));
+  expect(payload).toMatchObject({
+    resolution: 0.1, hierarchyChildResolution: 1.5,
+    hierarchyMinimumSize: 12, hierarchyMaxDepth: 2, hierarchyMaxCommunities: 500,
+  });
+});
+
+test("renders and drills into a persisted hierarchy tree", async () => {
+  const metrics = {
+    communityId: 0, nodeCount: 3, internalEdgeCount: 3, externalEdgeCount: 0,
+    internalWeight: 9, externalWeight: 0, internalDensity: 1, externalRatio: 0,
+    conductance: 0, coverage: 1, schemaDistribution: { SALES: 3 },
+    dominantSchema: "SALES", dominantSchemaRatio: 1, objectTypeDistribution: { TABLE: 3 },
+    topInternalHubs: [], topBridgeObjects: [], suggestedName: "SALES / ORDER",
+    nameExplanation: "Domináns séma: SALES.", stability: "NOT_ASSESSED", warnings: [],
+  };
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input);
+    const body = url.endsWith("/analyses/hierarchy-run/hierarchy/0") ? {
+      hierarchyId: "0", parentId: null, level: 0, resolution: 0.2,
+      splitResolution: 1, splitQuality: 2, nodeCount: 3, stopReason: "NO_SPLIT",
+      metrics, objects: [{
+        id: "A", owner: "SALES", name: "ORDERS", objectType: "TABLE",
+        oracleObjectType: "TABLE", status: "VALID", isExternal: false, metadata: {},
+      }],
+    } : url.endsWith("/analyses/hierarchy-run/hierarchy") ? {
+      analysisId: "hierarchy-run", experimental: true,
+      summary: {
+        baseResolution: 0.2, defaultChildResolution: 1, minimumSplitSize: 20,
+        maximumDepth: 3, rootCount: 1, hierarchyNodeCount: 1, leafCount: 1,
+        maximumDepthReached: 0, maximumCommunities: 10000,
+        resolutionOverrides: {}, unusedResolutionOverrideIds: [], leafMembershipCount: 3,
+        truncated: false, warning: "Kísérleti felosztás.",
+      },
+      roots: [{
+        hierarchyId: "0", parentId: null, level: 0, resolution: 0.2,
+        splitResolution: 1, splitQuality: 2, nodeCount: 3, stopReason: "NO_SPLIT",
+        metrics, childrenCount: 0, children: [],
+      }],
+    } : url.endsWith("/analyses/hierarchy-run/communities") ? { items: [] }
+      : url.endsWith("/analyses/hierarchy-run/community-graph") ? { nodes: [], edges: [] }
+        : url.endsWith("/analyses") ? { items: [{
+          id: "hierarchy-run", name: "Hierarchy run", status: "SUCCEEDED", algorithm: "LEIDEN",
+          config: { resolution: 0.2, hierarchyEnabled: true },
+          summary: {
+            algorithm: "LEIDEN", objective: "CPM", resolution: 0.2, quality: 1,
+            communityCount: 1, communitySizes: [3], singletonCount: 0,
+            smallCommunityCount: 0, isolatedNodeCount: 0, sharedInfrastructureCount: 0,
+            internalWeightRatio: 1, averageConductance: 0, medianConductance: 0,
+            schemaPurity: 1, runtimeSeconds: 0.01, pipelineCounts: {},
+          }, errorMessage: null, createdAt: "now", startedAt: "now", finishedAt: "now",
+        }] } : url.endsWith("/analyses/estimate") ? {
+          estimatedNodeCount: 3, estimatedRelationshipCount: 3, sourceNodeCount: 3,
+          sourceRelationshipCount: 3, estimatedMemoryBytes: 3000, sizeCategory: "SMALL",
+          withinLimits: true, limits: { maxNodes: 500000, maxEdges: 5000000 },
+          warnings: [], approximate: true,
+        } : url.endsWith("/scan/status") ? {
+          state: "IDLE", phase: null, progress_current: 0, progress_total: null,
+          message: null, error_code: null, error_message: null, counters: {},
+          started_at: null, finished_at: null,
+        } : url.endsWith("/scan/summary") ? { available: false, summary: null }
+          : { oracleConfigured: true, oracleMode: "thin", dataFilePresent: true, activeOperation: false, limits: {} };
+    return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+  });
+
+  render(<App />);
+  fireEvent.click(await screen.findByText("Hierarchy run"));
+  expect(await screen.findByText("Hierarchikus közösségtérkép")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /SALES \/ ORDER/ }));
+  expect(await screen.findByText("SALES.ORDERS · TABLE")).toBeInTheDocument();
+});

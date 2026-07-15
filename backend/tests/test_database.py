@@ -20,7 +20,7 @@ def test_schema_initializes_all_core_tables(tmp_path: Path) -> None:
         "app_meta", "scan_status", "objects", "relationships",
         "relationship_evidence", "analysis_runs", "analysis_membership",
         "community_metrics", "community_edges", "centrality_results", "annotations",
-        "export_jobs",
+        "export_jobs", "analysis_hierarchy", "analysis_hierarchy_membership",
     } <= tables
     integrity_check(path)
 

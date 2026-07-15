@@ -44,6 +44,12 @@ class AnalysisConfig:
     hub_policy: Literal["NONE", "DEGREE_NORMALIZATION", "EXCLUDE_TOP_HUBS"] = "DEGREE_NORMALIZATION"
     direction_policy: Literal["SYMMETRIZE_SUM"] = "SYMMETRIZE_SUM"
     include_technical_objects: bool = False
+    hierarchy_enabled: bool = False
+    hierarchy_child_resolution: float = 1.0
+    hierarchy_minimum_size: int = 20
+    hierarchy_max_depth: int = 3
+    hierarchy_max_communities: int = 10_000
+    hierarchy_resolution_overrides: dict[str, float] = field(default_factory=dict)
     application_version: str = "0.1.0"
     igraph_version: str = ""
 
@@ -65,6 +71,17 @@ class AnalysisConfig:
             hub_policy=value.get("hubPolicy", "DEGREE_NORMALIZATION"),
             direction_policy=value.get("directionPolicy", "SYMMETRIZE_SUM"),
             include_technical_objects=bool(value.get("includeTechnicalObjects", False)),
+            hierarchy_enabled=bool(value.get("hierarchyEnabled", False)),
+            hierarchy_child_resolution=float(value.get("hierarchyChildResolution", 1.0)),
+            hierarchy_minimum_size=int(value.get("hierarchyMinimumSize", 20)),
+            hierarchy_max_depth=int(value.get("hierarchyMaxDepth", 3)),
+            hierarchy_max_communities=int(value.get("hierarchyMaxCommunities", 10_000)),
+            hierarchy_resolution_overrides={
+                str(key): float(resolution)
+                for key, resolution in dict(
+                    value.get("hierarchyResolutionOverrides") or {}
+                ).items()
+            },
             application_version=value.get("applicationVersion", "0.1.0"),
             igraph_version=value.get("igraphVersion", ""),
         )
@@ -87,6 +104,12 @@ class AnalysisConfig:
             "hubPolicy": self.hub_policy,
             "directionPolicy": self.direction_policy,
             "includeTechnicalObjects": self.include_technical_objects,
+            "hierarchyEnabled": self.hierarchy_enabled,
+            "hierarchyChildResolution": self.hierarchy_child_resolution,
+            "hierarchyMinimumSize": self.hierarchy_minimum_size,
+            "hierarchyMaxDepth": self.hierarchy_max_depth,
+            "hierarchyMaxCommunities": self.hierarchy_max_communities,
+            "hierarchyResolutionOverrides": self.hierarchy_resolution_overrides,
             "applicationVersion": self.application_version,
             "igraphVersion": self.igraph_version,
         }
@@ -120,3 +143,5 @@ class AnalysisResult:
     community_edges: list[dict]
     centrality_results: list[dict]
     summary: dict
+    hierarchy_nodes: list[dict] = field(default_factory=list)
+    hierarchy_memberships: list[tuple[str, str]] = field(default_factory=list)
