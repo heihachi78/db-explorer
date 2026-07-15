@@ -30,6 +30,7 @@ function App() {
   const [config, setConfig] = useState<PublicConfig | null>(null);
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [selectedSchemas, setSelectedSchemas] = useState<string[]>([]);
+  const [selectedObjectTypes, setSelectedObjectTypes] = useState<string[]>([]);
   const [scanStatus, setScanStatus] = useState<ScanStatus | null>(null);
   const [scanSummary, setScanSummary] = useState<ScanSummary | null>(null);
   const [loading, setLoading] = useState(false);
@@ -78,6 +79,9 @@ function App() {
       setSelectedSchemas((current) => current.filter(
         (schema) => nextCapabilities.schemas.includes(schema),
       ));
+      setSelectedObjectTypes((current) => current.filter(
+        (objectType) => nextCapabilities.objectTypes.includes(objectType),
+      ));
     } catch (reason) {
       if (reason instanceof ApiError) {
         const detailMessage = reason.details.oracleMessage ?? reason.details.networkMessage;
@@ -101,11 +105,17 @@ function App() {
       : [...current, schema]);
   }
 
+  function toggleObjectType(objectType: string) {
+    setSelectedObjectTypes((current) => current.includes(objectType)
+      ? current.filter((item) => item !== objectType)
+      : [...current, objectType]);
+  }
+
   async function startScan() {
     setLoading(true);
     setError(null);
     try {
-      await api.startScan(selectedSchemas);
+      await api.startScan(selectedSchemas, selectedObjectTypes);
       setScanStatus(await api.scanStatus());
     } catch (reason) {
       setError(reason instanceof ApiError ? reason.message : "Az adatgyűjtés nem indítható el.");
@@ -226,6 +236,24 @@ function App() {
                     >{schema}</button>
                   ))}</div>
                 </div>
+                <details className="schema-preview">
+                  <summary>Objektumtípus-szűrés · {selectedObjectTypes.length || "minden"}</summary>
+                  <div>
+                    <button
+                      type="button"
+                      className={selectedObjectTypes.length === 0 ? "selected" : ""}
+                      onClick={() => setSelectedObjectTypes([])}
+                    >Minden típus</button>
+                    {capabilities.objectTypes.map((objectType) => (
+                      <button
+                        type="button"
+                        className={selectedObjectTypes.includes(objectType) ? "selected" : ""}
+                        key={objectType}
+                        onClick={() => toggleObjectType(objectType)}
+                      >{objectType}</button>
+                    ))}
+                  </div>
+                </details>
                 {capabilities.warnings.length > 0 && <p className="warning">{capabilities.warnings.length} katalógusnézet nem olvasható.</p>}
               </>
             )}
@@ -244,6 +272,7 @@ function App() {
           </div>
           <div className="scan-actions">
             <div><strong>{selectedSchemas.length}</strong><span>kiválasztott séma</span></div>
+            <div><strong>{selectedObjectTypes.length || "Mind"}</strong><span>objektumtípus</span></div>
             <button
               className="primary-button"
               onClick={startScan}
@@ -269,12 +298,24 @@ function App() {
           {analysisActive && <p className="operation-note">Közösségelemzés fut; új adatgyűjtés csak a befejezése után indítható.</p>}
           {exportActive && <p className="operation-note">Export készül; új hosszú művelet csak a befejezése után indítható.</p>}
           {scanSummary && (
-            <div className="scan-summary">
-              <div><span>Objektum</span><strong>{objectCount.toLocaleString("hu-HU")}</strong></div>
-              <div><span>Kapcsolat</span><strong>{relationshipCount.toLocaleString("hu-HU")}</strong></div>
-              <div><span>Külső cél</span><strong>{scanSummary.externalObjectCount.toLocaleString("hu-HU")}</strong></div>
-              <div><span>Feldolgozott séma</span><strong>{scanSummary.selectedSchemas.length}</strong></div>
-            </div>
+            <>
+              <div className="scan-summary">
+                <div><span>Objektum</span><strong>{objectCount.toLocaleString("hu-HU")}</strong></div>
+                <div><span>Kapcsolat</span><strong>{relationshipCount.toLocaleString("hu-HU")}</strong></div>
+                <div><span>Külső cél</span><strong>{scanSummary.externalObjectCount.toLocaleString("hu-HU")}</strong></div>
+                <div><span>Feldolgozott séma</span><strong>{scanSummary.selectedSchemas.length}</strong></div>
+              </div>
+              <details className="scan-coverage">
+                <summary>Lefedettségi részletek</summary>
+                <div>
+                  <section><h4>Owner szerint</h4><ul>{Object.entries(scanSummary.ownerCounts).map(([owner, count]) => <li key={owner}><span>{owner}</span><strong>{count}</strong></li>)}</ul></section>
+                  <section><h4>Objektumtípus szerint</h4><ul>{Object.entries(scanSummary.objectTypeCounts).map(([objectType, count]) => <li key={objectType}><span>{objectType}</span><strong>{count}</strong></li>)}</ul></section>
+                  <section><h4>Kapcsolattípus szerint</h4><ul>{Object.entries(scanSummary.relationshipTypeCounts).map(([relationshipType, count]) => <li key={relationshipType}><span>{relationshipType}</span><strong>{count}</strong></li>)}</ul></section>
+                </div>
+                {scanSummary.unresolvedSynonymCount > 0 && <p className="warning">Fel nem oldott synonym: {scanSummary.unresolvedSynonymCount}</p>}
+                {scanSummary.warnings.map((warning) => <p className="warning" key={warning}>{warning}</p>)}
+              </details>
+            </>
           )}
         </section>
         <Suspense fallback={<div className="explorer-loading">Gráfböngésző betöltése…</div>}>

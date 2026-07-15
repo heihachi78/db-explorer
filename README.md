@@ -27,6 +27,14 @@ Helyben futó, egyfelhasználós alkalmazás Oracle adatbázis-objektumok és ka
 
 Az aktuális munkafájl a host `data/oracle_graph.db` fájlja. A scanner futás közben külön `oracle_graph.next.db` fájlt épít, és csak sikeres integritásellenőrzés után cseréli le atomikusan az aktuális adatot. A jelszó nem kerül bele az adatbázisba és API-válaszba.
 
+Izolált, üres adatkönyvtáras próba indítható a meglévő felmérés érintése nélkül az `APP_DATA_HOST_DIR` átmeneti felülírásával; az alkalmazáson belüli útvonal továbbra is `/data` marad. Például egy már futó Compose Oracle mellett:
+
+```bash
+mkdir -p /tmp/db-explorer-smoke
+APP_PORT=18001 APP_DATA_HOST_DIR=/tmp/db-explorer-smoke \
+  docker compose run --rm --no-deps -p 18001:18001 oracle-graph-analyzer
+```
+
 ## Helyi fejlesztés
 
 Backend:
@@ -68,7 +76,7 @@ cd frontend && npm test -- --run && npm run build
 - külső és távoli célok placeholder node-jai, determinisztikus élek és külön evidence-rekordok;
 - scan lefedettségi összesítő owner-, objektumtípus- és kapcsolattípus-számlálókkal;
 - megszakításbiztos staging pipeline, idegenkulcs- és endpoint-validálás, majd atomikus publikálás;
-- React/TypeScript kapcsolat-, sémaválasztó-, scanállapot- és összesítő képernyő;
+- React/TypeScript kapcsolat-, séma- és opcionális objektumtípus-választó, scanállapot- és összesítő képernyő;
 - facettált objektumkereső, objektum- és kapcsolatrészlet API evidence adatokkal;
 - irány-, kapcsolattípus- és confidence-szűrt, szerveroldalon limitált részgráf API;
 - ciklusbiztos dependents/dependencies hatáselemzés és hopszám- vagy súlyalapú útvonalkeresés;
@@ -104,8 +112,10 @@ cd frontend && npm test -- --run && npm run build
 
 A stabilitási címke alapértelmezett küszöbei: `STABLE ≥ 0,80`, `MIXED ≥ 0,55`, ez alatt `UNSTABLE`. A node-pontszám legfeljebb tíz, az elemzési gráfban megmaradó fő szomszéddal való együttklaszterezés gyakorisága a seed-futások között.
 
-## Következő mérföldkő
+## Átadási állapot
 
-A funkcionális mag elkészült. A hátralévő munka a helyi, egyszeri használathoz igazított átadás: Docker Compose indítás tiszta `data/` könyvtárral, egy kis Oracle smoke próba, majd a tényleges céladatbázison a kapcsolat → scan → kézi kontrollminta → elemzés → export munkafolyamat végigjárása. Külön golden Oracle-környezet, általános nagygráf-benchmark, tartós fájllog vagy vállalati üzemeltetési réteg nem része a scope-nak.
+A karcsúsított terv funkcionális követelményei elkészültek. A 2026-07-15-i átadási próbán a production Docker image üres adatkönyvtárból indult, Oracle 23.26.2 adatbázishoz read-only módban kapcsolódott, majd a kapcsolat → többsémás scan → kontrollminta → Leiden-elemzés → JSON-export folyamat sikeresen végigfutott. A próba 740 objektumot és 924 forráskapcsolatot gyűjtött; az elemzés 502 csomóponton és 302 aggregált élen 305 közösséget készített.
+
+Az automatikus regresszió 44 backend- és 11 frontendtesztből áll; a frontend production build és a Docker image buildje is sikeres. Más céladatbázis használatakor a kézi kontrollminta megismétlése továbbra is a felmérés része, nem külön fejlesztési vagy üzemeltetési projekt. Golden Oracle-környezet, általános nagygráf-benchmark, tartós fájllog és vállalati üzemeltetési réteg nem része a scope-nak.
 
 Részletes terv: [oracle-adatbazis-graf-megvalositasi-terv.md](oracle-adatbazis-graf-megvalositasi-terv.md)

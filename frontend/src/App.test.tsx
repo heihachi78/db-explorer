@@ -51,6 +51,7 @@ test("shows the configured Oracle connection", async () => {
   render(<App />);
   expect(await screen.findByText("Beállítva")).toBeInTheDocument();
   expect(await screen.findByText("Objektum")).toBeInTheDocument();
+  expect(await screen.findByText("Lefedettségi részletek")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Kapcsolat tesztelése" })).toBeEnabled();
 });
 
@@ -101,6 +102,49 @@ test("shows a static completed progress bar without stale phase labels", async (
   expect(progress).toHaveAttribute("max", "1");
   expect(screen.queryByText("PUBLISHING")).not.toBeInTheDocument();
   expect(screen.queryByText("Operation completed.")).not.toBeInTheDocument();
+});
+
+test("starts a scan with the selected schemas and optional object types", async () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = String(input);
+    const body = url.endsWith("/connection/test") ? {
+      success: true,
+      capabilities: {
+        oracleVersion: "23", databaseName: "TESTDB", containerName: "TESTPDB",
+        currentSchema: "READER", driverMode: "thin", schemas: ["SALES"],
+        readableViews: ["ALL_OBJECTS"], missingViews: [],
+        objectTypes: ["TABLE", "VIEW"], warnings: [],
+      },
+    } : url.endsWith("/scan") && init?.method === "POST" ? { accepted: true }
+      : url.endsWith("/scan/status") ? {
+        state: "IDLE", phase: null, progress_current: 0, progress_total: null,
+        message: null, error_code: null, error_message: null, counters: {},
+        started_at: null, finished_at: null,
+      } : url.endsWith("/scan/summary") ? { available: false, summary: null }
+        : {
+          oracleConfigured: true, oracleMode: "thin", dataFilePresent: false,
+          activeOperation: false, limits: {},
+        };
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Kapcsolat tesztelése" }));
+  fireEvent.click(await screen.findByRole("button", { name: "SALES" }));
+  fireEvent.click(await screen.findByText(/Objektumtípus-szűrés/));
+  fireEvent.click(await screen.findByRole("button", { name: "TABLE" }));
+  fireEvent.click(screen.getByRole("button", { name: "Adatgyűjtés indítása" }));
+
+  await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith(
+    "/api/scan",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ schemas: ["SALES"], objectTypes: ["TABLE"] }),
+    }),
+  ));
 });
 
 test("does not present a completed export as a successful scan", async () => {
@@ -339,6 +383,12 @@ test("shows persisted analysis metrics and starts a resolution profile", async (
 
   render(<App />);
   expect(await screen.findByText("6 node · 7 kapcsolat")).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Kapcsolattípus-súlyok"));
+  fireEvent.change(screen.getByLabelText("Idegen kulcs súlya"), { target: { value: "7" } });
+  await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith(
+    "/api/analyses/estimate",
+    expect.objectContaining({ body: expect.stringContaining('"FOREIGN_KEY":7') }),
+  ));
   fireEvent.click(await screen.findByText("Domain analysis"));
   expect(await screen.findByText("SALES / ORDER")).toBeInTheDocument();
   expect(screen.getByText("90.0%")).toBeInTheDocument();

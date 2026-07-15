@@ -21,9 +21,7 @@ class ConnectionTestResponse(BaseModel):
 class ScanRequest(BaseModel):
     schemas: list[str] = Field(min_length=1)
     objectTypes: list[str] = Field(default_factory=list)
-    includeSourceCode: bool = False
     resolveExternalReferences: bool = True
-    includeSchedulerObjects: bool = False
     synonymMaxDepth: int = Field(default=8, ge=1, le=32)
 
     @field_validator("schemas", "objectTypes")

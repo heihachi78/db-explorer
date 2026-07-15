@@ -45,9 +45,7 @@ class ProgressReporter(Protocol):
 class ScanOptions:
     schemas: tuple[str, ...]
     object_types: tuple[str, ...] = ()
-    include_source_code: bool = False
     resolve_external_references: bool = True
-    include_scheduler_objects: bool = False
     synonym_max_depth: int = 8
 
 

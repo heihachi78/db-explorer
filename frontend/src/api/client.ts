@@ -16,7 +16,6 @@ export interface Capabilities {
   readableViews: string[];
   missingViews: string[];
   objectTypes: string[];
-  dbmsMetadataGetDdl: boolean;
   warnings: string[];
 }
 
@@ -334,9 +333,9 @@ export const api = {
     );
     return result.summary;
   },
-  startScan: (schemas: string[]) => request<{ accepted: boolean }>("/scan", {
+  startScan: (schemas: string[], objectTypes: string[] = []) => request<{ accepted: boolean }>("/scan", {
     method: "POST",
-    body: JSON.stringify({ schemas }),
+    body: JSON.stringify({ schemas, objectTypes }),
   }),
   cancelScan: () => request<{ accepted: boolean }>("/scan/cancel", { method: "POST" }),
   searchObjects: (parameters: {
@@ -400,6 +399,7 @@ export const api = {
     minimumConfidence: number;
     hubPolicy: "NONE" | "DEGREE_NORMALIZATION" | "EXCLUDE_TOP_HUBS";
     includeTechnicalObjects: boolean;
+    edgeWeights: Record<string, number>;
   }) => request<{ accepted: boolean; analysisId: string }>("/analyses", {
     method: "POST",
     body: JSON.stringify(payload),
@@ -412,6 +412,7 @@ export const api = {
     minimumConfidence: number;
     hubPolicy: "NONE" | "DEGREE_NORMALIZATION" | "EXCLUDE_TOP_HUBS";
     includeTechnicalObjects: boolean;
+    edgeWeights: Record<string, number>;
   }) => request<AnalysisEstimate>("/analyses/estimate", {
     method: "POST",
     body: JSON.stringify(payload),
@@ -423,6 +424,7 @@ export const api = {
     minimumConfidence: number;
     hubPolicy: "NONE" | "DEGREE_NORMALIZATION" | "EXCLUDE_TOP_HUBS";
     includeTechnicalObjects: boolean;
+    edgeWeights: Record<string, number>;
   }) => request<{ accepted: boolean; analysisIds: string[] }>(
     "/analyses/resolution-profile",
     { method: "POST", body: JSON.stringify(payload) },
@@ -434,6 +436,7 @@ export const api = {
     minimumConfidence: number;
     hubPolicy: "NONE" | "DEGREE_NORMALIZATION" | "EXCLUDE_TOP_HUBS";
     includeTechnicalObjects: boolean;
+    edgeWeights: Record<string, number>;
   }) => request<{ accepted: boolean; analysisIds: string[]; baselineAnalysisId: string }>(
     "/analyses/seed-profile",
     { method: "POST", body: JSON.stringify(payload) },
@@ -446,6 +449,7 @@ export const api = {
     minimumConfidence: number;
     hubPolicy: "NONE" | "DEGREE_NORMALIZATION" | "EXCLUDE_TOP_HUBS";
     includeTechnicalObjects: boolean;
+    edgeWeights: Record<string, number>;
     hierarchyChildResolution: number;
     hierarchyMinimumSize: number;
     hierarchyMaxDepth: number;

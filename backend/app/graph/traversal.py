@@ -10,13 +10,8 @@ from app.persistence.graph_repository import Direction, GraphRepository
 
 DEFAULT_EDGE_WEIGHTS = {
     "FOREIGN_KEY": 5.0,
-    "READS_FROM": 4.0,
     "TRIGGER_ON": 4.0,
-    "WRITES_TO": 4.0,
     "DEPENDS_ON": 3.0,
-    "CALLS": 3.0,
-    "CONTAINS": 2.0,
-    "USES_SEQUENCE": 1.5,
     "POINTS_TO": 1.0,
     "INDEX_ON": 0.5,
 }

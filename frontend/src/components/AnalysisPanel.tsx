@@ -18,6 +18,20 @@ import { CommunityGraphCanvas } from "./CommunityGraphCanvas";
 
 
 const ACTIVE_ANALYSIS_STATES = new Set(["QUEUED", "RUNNING"]);
+const DEFAULT_EDGE_WEIGHTS = {
+  FOREIGN_KEY: 5,
+  TRIGGER_ON: 4,
+  DEPENDS_ON: 3,
+  POINTS_TO: 1,
+  INDEX_ON: 0.5,
+};
+const EDGE_WEIGHT_LABELS: Record<keyof typeof DEFAULT_EDGE_WEIGHTS, string> = {
+  FOREIGN_KEY: "Idegen kulcs",
+  TRIGGER_ON: "Trigger",
+  DEPENDS_ON: "Függőség",
+  POINTS_TO: "Synonym",
+  INDEX_ON: "Index",
+};
 
 function percent(value: number | undefined) {
   return value === undefined ? "—" : `${(value * 100).toFixed(1)}%`;
@@ -114,6 +128,7 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
   const [minimumConfidence, setMinimumConfidence] = useState(0.8);
   const [hubPolicy, setHubPolicy] = useState<"NONE" | "DEGREE_NORMALIZATION" | "EXCLUDE_TOP_HUBS">("DEGREE_NORMALIZATION");
   const [includeTechnicalObjects, setIncludeTechnicalObjects] = useState(false);
+  const [edgeWeights, setEdgeWeights] = useState({ ...DEFAULT_EDGE_WEIGHTS });
   const [hierarchyBaseResolution, setHierarchyBaseResolution] = useState(0.2);
   const [hierarchyChildResolution, setHierarchyChildResolution] = useState(1.0);
   const [hierarchyMinimumSize, setHierarchyMinimumSize] = useState(20);
@@ -146,7 +161,10 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
   }, []);
 
   function analysisPayload() {
-    return { name, objective, resolution, seed, minimumConfidence, hubPolicy, includeTechnicalObjects };
+    return {
+      name, objective, resolution, seed, minimumConfidence, hubPolicy,
+      includeTechnicalObjects, edgeWeights,
+    };
   }
 
   useEffect(() => {
@@ -162,7 +180,7 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
       });
     }, 400);
     return () => { disposed = true; clearTimeout(timer); };
-  }, [name, objective, resolution, seed, minimumConfidence, hubPolicy, includeTechnicalObjects]);
+  }, [name, objective, resolution, seed, minimumConfidence, hubPolicy, includeTechnicalObjects, edgeWeights]);
 
   async function start(event: FormEvent) {
     event.preventDefault();
@@ -367,6 +385,26 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
           <label>Hub policy<select value={hubPolicy} onChange={(event) => setHubPolicy(event.target.value as typeof hubPolicy)}><option value="DEGREE_NORMALIZATION">Fokszám-normalizálás</option><option value="NONE">Nincs korrekció</option><option value="EXCLUDE_TOP_HUBS">Top 1% kizárása</option></select></label>
           <label className="checkbox-label"><input type="checkbox" checked={includeTechnicalObjects} onChange={(event) => setIncludeTechnicalObjects(event.target.checked)} />Technikai objektumok bevonása</label>
           {includeTechnicalObjects && <p className="analysis-warning">Az indexek és synonymok torzíthatják a közösséghatárokat.</p>}
+          <details className="hierarchy-config">
+            <summary>Kapcsolattípus-súlyok</summary>
+            <div className="analysis-form-row">
+              {(Object.keys(DEFAULT_EDGE_WEIGHTS) as Array<keyof typeof DEFAULT_EDGE_WEIGHTS>).map((relationshipType) => (
+                <label key={relationshipType}>{EDGE_WEIGHT_LABELS[relationshipType]}
+                  <input
+                    aria-label={`${EDGE_WEIGHT_LABELS[relationshipType]} súlya`}
+                    type="number"
+                    min="0.01"
+                    step="0.1"
+                    value={edgeWeights[relationshipType]}
+                    onChange={(event) => setEdgeWeights((current) => ({
+                      ...current,
+                      [relationshipType]: Number(event.target.value),
+                    }))}
+                  />
+                </label>
+              ))}
+            </div>
+          </details>
           <div className={`analysis-estimate ${estimate && !estimate.withinLimits ? "blocked" : ""}`} aria-live="polite">
             <strong>{estimatePending ? "Méretbecslés…" : "Futtatás előtti becslés"}</strong>
             {estimate && <>

@@ -20,7 +20,7 @@ services:
     ports:
       - "${APP_PORT:-8000}:${APP_PORT:-8000}"
     volumes:
-      - ./data:/data
+      - ${APP_DATA_HOST_DIR:-./data}:/data
     depends_on:
       ora-db:
         condition: service_healthy

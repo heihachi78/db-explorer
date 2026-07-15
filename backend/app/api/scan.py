@@ -38,9 +38,7 @@ async def start_scan(payload: ScanRequest, request: Request) -> dict[str, bool]:
     options = ScanOptions(
         schemas=tuple(payload.schemas),
         object_types=tuple(payload.objectTypes),
-        include_source_code=payload.includeSourceCode,
         resolve_external_references=payload.resolveExternalReferences,
-        include_scheduler_objects=payload.includeSchedulerObjects,
         synonym_max_depth=payload.synonymMaxDepth,
     )
 

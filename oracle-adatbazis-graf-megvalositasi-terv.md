@@ -1,6 +1,6 @@
 # Oracle adatbázis-objektumgráf és elemzőalkalmazás – részletes megvalósítási terv
 
-**Dokumentum állapota:** megvalósítás alatt álló, karcsúsított terv
+**Dokumentum állapota:** megvalósított, karcsúsított terv
 
 **Dátum:** 2026-07-15
 
@@ -444,12 +444,11 @@ Bármely aktív állapot → FAILED vagy CANCELLED
 A scan után jelenjen meg:
 
 - objektumszám owner és típus szerint;
-- kapcsolatszám típus, origin és confidence szerint;
+- kapcsolatszám típus szerint;
 - külső placeholder node-ok száma;
 - fel nem oldott synonymok száma;
 - hiányzó nézetjogok;
-- figyelmen kívül hagyott vagy ismeretlen Oracle objektumtípusok;
-- teljes futási idő.
+- a scanner által jelzett további lefedettségi figyelmeztetések.
 
 ## 11. A három gráfréteg
 
