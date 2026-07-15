@@ -1,11 +1,15 @@
 # Oracle adatbázis-objektumgráf és elemzőalkalmazás – részletes megvalósítási terv
 
-**Dokumentum állapota:** megvalósításra előkészített terv
+**Dokumentum állapota:** megvalósítás alatt álló, karcsúsított terv
 
-**Dátum:** 2026-07-14
+**Dátum:** 2026-07-15
 
 **Cél:** egyszeri, egyfelhasználós Oracle-adatbázis-felmérés támogatása
-**Becsült megvalósítás:** 9–10 hét kis fejlesztőcsapattal
+
+**Scope-elv:** csak olyan funkció része a tervnek, amely közvetlenül javítja a
+kinyerés helyességét, az elemzés használhatóságát vagy az egyetlen helyi
+adatfájl biztonságát. Többfelhasználós működés, tartós szolgáltatásüzemeltetés,
+auditálás, automatikus ütemezés és általános célú bővíthetőség nem követelmény.
 
 ## 1. Az alkalmazás ötlete röviden
 
@@ -36,21 +40,19 @@ Az alkalmazás helyben, Docker Compose segítségével fut. Nincs belépés, fel
 - A közösségdetektálás paramétereinek interaktív kísérletezésével az elemző munkájának gyorsítása.
 - A számítások eredetének és beállításainak megőrzése az aktuális felmérésen belül.
 
-### 2.2. Mérhető sikerkritériumok
+### 2.2. Gyakorlati sikerkritériumok
 
-| Terület | Célérték |
-|---|---:|
-| Kiválasztott sémák objektumainak lefedettsége | legalább 95% a támogatott típusokra |
-| Katalógusból származó kapcsolatok pontossága | legalább 99% kézi kontrollmintán |
-| Azonos nevű, eltérő sémájú objektumok elkülönítése | 100% |
-| Sémák közötti FK- és dependency-kapcsolatok megőrzése | 100% a látható katalógusadatok alapján |
-| Objektumkeresés | 500 ms alatt tipikus helyi gépen |
-| Korlátozott 1–2 mélységű részgráf | 1 másodperc alatt tipikus adathalmazon |
-| Elemzés reprodukálhatósága | azonos adat + konfiguráció + seed esetén azonos eredmény |
-| Oracle-adatbázis módosítása | soha; kizárólag olvasás |
-| Felhasználói indítás | egyetlen `docker compose up --build` paranccsal |
-
-A nagy gráfokra vonatkozó idő- és memóriahatárokat az első valós adatkivonaton kell pontosítani.
+- Az Oracle-kapcsolat kizárólag olvasási célú; az alkalmazás nem módosítja a
+  forrásadatbázist.
+- Azonos nevű, eltérő ownerű vagy típusú objektumok nem ütköznek.
+- A látható katalógusadatokból származó, támogatott objektumok és kapcsolatok
+  megmaradnak, a kimaradások pedig a lefedettségi riportban látszanak.
+- Azonos adat, konfiguráció és seed azonos elemzési eredményt ad.
+- A keresés és a korlátozott részgráf-bejárás a céladatbázis tipikus
+  használatában interaktív marad; ehhez nincs általános SLA.
+- Az alkalmazás egyetlen `docker compose up --build` paranccsal indítható.
+- Egy sikertelen új scan nem teszi használhatatlanná az előző sikeres helyi
+  adathalmazt.
 
 ### 2.3. Nem cél
 
@@ -108,8 +110,8 @@ A nagy gráfokra vonatkozó idő- és memóriahatárokat az első valós adatkiv
 - **Oracle kapcsolat:** `python-oracledb`, alapértelmezetten Thin mód.
 - **Helyi tárolás:** Python beépített `sqlite3` modulja és egyetlen SQLite-fájl.
 - **Gráfelemzés:** `python-igraph`; Leiden elsődlegesen a beépített `community_leiden` implementációval.
-- **Speciális Leiden-funkció:** `leidenalg` csak resolution-profile vagy speciális partition esetén.
-- **Futtatás:** egy Docker image és egy Docker Compose szolgáltatás.
+- **Futtatás:** egy alkalmazás-image és egyetlen alkalmazásszolgáltatás; nincs
+  külön queue, cache, alkalmazás-adatbázis vagy megfigyelési stack.
 - **Frontend kiszolgálás:** a buildelt frontend statikus fájljait a FastAPI szolgálja ki.
 - **Hosszú műveletek:** egyetlen folyamaton belüli háttértask; nincs Celery, Redis vagy külön worker.
 
@@ -121,59 +123,28 @@ A nagy gráfokra vonatkozó idő- és memóriahatárokat az első valós adatkiv
 - A frontend pollinggal kérdezze le a scan vagy elemzés állapotát; WebSocket/SSE nem szükséges.
 - Leállításkor a folyamatban lévő művelet megszakított állapotot kap; az aktuális sikeres adatfájl nem sérülhet.
 
-## 5. Monorepo-struktúra
+## 5. Egyszerű projektstruktúra
 
 ```text
 oracle-graph-analyzer/
 ├── frontend/
-│   ├── src/
-│   │   ├── api/
-│   │   ├── components/
-│   │   ├── features/
-│   │   │   ├── scan/
-│   │   │   ├── objects/
-│   │   │   ├── graph/
-│   │   │   ├── communities/
-│   │   │   └── analysis/
-│   │   └── styles/
-│   ├── tests/
+│   ├── src/                 # React felület, API kliens és komponensek
 │   └── package.json
 ├── backend/
-│   ├── app/
-│   │   ├── api/
-│   │   ├── config.py
-│   │   ├── oracle/
-│   │   │   ├── connection.py
-│   │   │   ├── capabilities.py
-│   │   │   ├── queries/
-│   │   │   └── extractors/
-│   │   ├── graph/
-│   │   │   ├── models.py
-│   │   │   ├── normalization.py
-│   │   │   ├── builder.py
-│   │   │   ├── traversal.py
-│   │   │   └── metrics.py
-│   │   ├── analysis/
-│   │   │   ├── preprocessing.py
-│   │   │   ├── communities.py
-│   │   │   ├── centrality.py
-│   │   │   └── comparison.py
-│   │   ├── persistence/
-│   │   │   ├── database.py
-│   │   │   ├── schema.sql
-│   │   │   └── repositories.py
-│   │   └── tasks/
+│   ├── app/                 # API, Oracle scanner, gráf, elemzés, SQLite
 │   ├── tests/
 │   └── pyproject.toml
-├── data/
-│   └── .gitkeep
+├── data/                    # egyetlen aktuális SQLite-adatfájl és exportok
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .env.example
 └── README.md
 ```
 
-Fejlesztéskor a frontend és backend külön indítható, de a felmérést végző felhasználó számára csak a Docker Compose-os, egy szolgáltatásból álló futtatás dokumentálandó.
+Fejlesztéskor a frontend és backend külön indítható, de a felmérést végző
+felhasználó számára csak a Docker Compose-os, egy alkalmazáskonténerből álló
+futtatást kell dokumentálni. A cél Oracle lehet meglévő külső adatbázis vagy a
+helyi Compose-ban indított példány.
 
 ## 6. Helyi SQLite-adatmodell
 
@@ -186,13 +157,14 @@ Fejlesztéskor a frontend és backend külön indítható, de a felmérést vég
 | `objects` | az aktuális felmérés normalizált Oracle-objektumai |
 | `relationships` | nyers, irányított és típusos kapcsolatok |
 | `relationship_evidence` | a kapcsolat forrása és bizonyítéka |
-| `object_details` | típusfüggő részletek JSON-ként vagy külön oszlopokban |
 | `analysis_runs` | az aktuális adathalmazon futtatott elemzések konfigurációi |
 | `analysis_membership` | objektum és közösség megfeleltetés |
 | `community_metrics` | közösségenként számított mutatók |
 | `community_edges` | közösségek közötti aggregált élek |
 | `centrality_results` | elemzésenkénti központisági értékek |
 | `annotations` | helyi közösségnév és elemzői megjegyzés |
+| `analysis_hierarchy*` | a kísérleti hierarchia fája és levéltagságai |
+| `export_jobs` | az aktuális munkamenetben készített exportok állapota |
 
 ### 6.2. Kötelező indexek
 
@@ -233,7 +205,8 @@ ORACLE_MODE=thin
 APP_PORT=8000
 ```
 
-A jelszó csak a helyi `.env` fájlban vagy Docker secretként jelenjen meg. Ne kerüljön SQLite-ba, API-válaszba, exportba vagy logba.
+A jelszó csak a helyi, git által nem követett `.env` fájlban jelenjen meg. Ne
+kerüljön SQLite-ba, API-válaszba vagy exportba.
 
 ### 7.2. Kapcsolatpróba és capabilities
 
@@ -241,14 +214,16 @@ A kapcsolatpróba adja vissza:
 
 - Oracle-verzió;
 - adatbázis és container/PDB neve;
-- Thin/Thick mód;
+- kapcsolódási mód;
 - elérhető sémák;
-- olvasható `ALL_*` vagy – ha külön engedélyezett – `DBA_*` nézetek;
+- a scannerhez szükséges olvasható `ALL_*` nézetek;
 - elérhető objektumtípusok;
-- `DBMS_METADATA.GET_DDL` használhatósága;
 - figyelmeztetések a hiányzó nézetjogokra.
 
-Az első verzió alapértelmezett scope-ja `ALL_*`. A kiválasztott sémák listája minden releváns lekérdezésben bind változóként szerepeljen.
+A scope kizárólag a read-only metadata felhasználó által látható `ALL_*`
+nézetekre épül. `DBA_*` jogosultság és külön adminisztrátori üzemmód nem része
+a tervnek. A kiválasztott sémák listája minden releváns lekérdezésben bind
+változóként szerepeljen.
 
 ### 7.3. Több séma szabályai
 
@@ -265,7 +240,7 @@ Az első verzió alapértelmezett scope-ja `ALL_*`. A kiválasztott sémák list
 
 ### 8.1. Alap objektumlista
 
-Elsődleges forrás: `ALL_OBJECTS`, opcionális teljes katalógus-scope esetén `DBA_OBJECTS`.
+Elsődleges forrás: `ALL_OBJECTS`.
 
 ```sql
 SELECT owner, object_name, subobject_name, object_id,
@@ -283,23 +258,15 @@ A tényleges implementáció dinamikusan generált bind placeholder-listát hasz
 |---|---|---|
 | Általános objektumok | `ALL_OBJECTS` | minden node alapadata |
 | Programfüggőségek | `ALL_DEPENDENCIES` | `DEPENDS_ON` |
-| Táblák | `ALL_TABLES` | TABLE metadata |
-| Oszlopok | `ALL_TAB_COLUMNS` | alapból TABLE/VIEW metadata |
-| Constraint-ek | `ALL_CONSTRAINTS` | PK/UK/check metadata és FK |
+| Constraint-ek | `ALL_CONSTRAINTS` | FK-kapcsolat |
 | Constraint-oszlopok | `ALL_CONS_COLUMNS` | FK forrás/cél oszloplista |
-| View-k | `ALL_VIEWS` | definíció/hash és dependency-kiegészítés |
-| Materialized view-k | `ALL_MVIEWS` | MV metadata |
-| Indexek | `ALL_INDEXES` | INDEX node vagy technikai metadata |
-| Indexoszlopok | `ALL_IND_COLUMNS` | index oszloplista |
+| Indexek | `ALL_INDEXES` | `INDEX_ON` kapcsolat |
 | Triggerek | `ALL_TRIGGERS` | `TRIGGER_ON` + metadata |
 | Synonymok | `ALL_SYNONYMS` | `POINTS_TO` vagy külső placeholder |
-| PL/SQL forrás | `ALL_SOURCE` | opcionális statikus elemzés bemenete |
-| Argumentumok | `ALL_ARGUMENTS` | procedure/function/package metadata |
-| Sequence-ek | `ALL_SEQUENCES` | SEQUENCE node |
-| Típusok | `ALL_TYPES`, `ALL_TYPE_ATTRS` | TYPE node és típuskapcsolat |
-| Adatbázis-linkek | `ALL_DB_LINKS` | DB_LINK node, titok nélkül |
-| Scheduler objektumok | `ALL_SCHEDULER_JOBS`, `ALL_SCHEDULER_PROGRAMS` | opcionális node és `RUNS` kapcsolat |
-| DDL | `DBMS_METADATA.GET_DDL` | igény szerinti részlet, nem kötelező tömegesen |
+
+Az `ALL_OBJECTS` által látható egyéb típusok generikus node-ként megmaradnak,
+de nem kapnak külön extractort csak azért, hogy minden lehetséges Oracle
+objektumtípushoz saját metadata-modell tartozzon.
 
 ### 8.3. Objektumfüggőségek
 
@@ -359,20 +326,12 @@ A forrásgráf megőrzi a `PACKAGE` és `PACKAGE BODY` Oracle-rekordokat és biz
 - spec/body elérhetőség;
 - összesített függőségek, az eredeti evidence megőrzésével.
 
-### 8.7. Forráskód és dinamikus SQL
+### 8.7. Forráskód és dinamikus SQL határa
 
-Az első használható verzió biztos kapcsolatai a katalógusnézetekből származnak. Opcionális második feldolgozási lépés vizsgálhatja az `ALL_SOURCE` és view definíciók statikus hivatkozásait:
-
-- procedure/function/package hívások;
-- `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE` objektumhivatkozások;
-- sequence `NEXTVAL`/`CURRVAL` használat;
-- statikusan felismerhető synonym-hivatkozások.
-
-A dinamikus SQL-ben összefűzött nevek nem tekinthetők biztosnak. A rendszer különböztesse meg:
-
-- `ORACLE_CATALOG`, confidence `1.0`;
-- `STATIC_PARSER`, confidence tipikusan `0.8–0.95`;
-- `HEURISTIC`, confidence a szabály alapján, legfeljebb `0.7`.
+A kapcsolatok a katalógusnézetekből származnak. PL/SQL- vagy SQL-parser,
+forráskódtárolás és heurisztikus dinamikus-SQL-felismerés nem része ennek a
+helyi elemzőeszköznek. Az ilyen hivatkozások hiánya ismert korlátként jelenjen
+meg; kézi vizsgálatuk a felmérés része lehet.
 
 ## 9. Normalizált gráfmodell
 
@@ -434,12 +393,6 @@ Az Oracle `OBJECT_ID` attribútum, nem stabil alkalmazásazonosító, mert objek
 | `TRIGGER_ON` | trigger eseményforrása |
 | `INDEX_ON` | index és tábla technikai kapcsolata |
 | `POINTS_TO` | synonym célja |
-| `CONTAINS` | logikai tartalmazás, például package elem |
-| `CALLS` | statikusan felismert programhívás |
-| `READS_FROM` | statikusan felismert olvasás |
-| `WRITES_TO` | statikusan felismert írás |
-| `USES_SEQUENCE` | sequence használat |
-| `RUNS` | scheduler job és program/eljárás kapcsolata |
 
 ## 10. Adatgyűjtési és publikálási pipeline
 
@@ -496,8 +449,7 @@ A scan után jelenjen meg:
 - fel nem oldott synonymok száma;
 - hiányzó nézetjogok;
 - figyelmen kívül hagyott vagy ismeretlen Oracle objektumtípusok;
-- parserhibák és heurisztikus találatok;
-- teljes futási idő fázisonként.
+- teljes futási idő.
 
 ## 11. A három gráfréteg
 
@@ -587,14 +539,8 @@ A felület adjon „technikai objektumok bevonása” kapcsolót, de figyelmezte
 | Kapcsolat | Alapsúly | Indoklás |
 |---|---:|---|
 | `FOREIGN_KEY` | 5.0 | erős adatmodell-kapcsolat |
-| biztos view dependency / `READS_FROM` | 4.0 | erős logikai adatfüggés |
 | `TRIGGER_ON` | 4.0 | szoros életciklus-kapcsolat |
-| `WRITES_TO` | 4.0 | erős működési csatolás |
-| `DEPENDS_ON` | 3.0 | általános statikus függőség |
-| `CALLS` | 3.0 | programozott kapcsolat |
-| `READS_FROM` parserből | 3.0 | confidence-del korrigálva |
-| `CONTAINS` | 2.0 | logikai tartalmazás |
-| `USES_SEQUENCE` | 1.5 | adat-előállítási kapcsolat |
+| `DEPENDS_ON` | 3.0 | általános katalógusfüggőség |
 | `POINTS_TO` | 1.0 | alias jellegű kapcsolat |
 | `INDEX_ON` | 0.5 | technikai kapcsolat, általában kizárva |
 
@@ -719,16 +665,12 @@ Egy kiválasztott konfiguráció opcionálisan fusson például `5` seeddel. Ös
 
 Az alkalmazás a közösséget `STABLE`, `MIXED` vagy `UNSTABLE` jelzővel lássa el konfigurálható, de dokumentált küszöbök alapján. Az alapértelmezett egyetlen seed a gyors interaktív használatot szolgálja; a többseedes futás külön gomb legyen.
 
-### 13.4. Kontrollalgoritmusok
+### 13.4. Ellenőrzési mód
 
-Az első implementáció kötelező algoritmusa Leiden. Az elemző interfész azonban közös absztrakciót használjon, hogy később könnyen hozzáadható legyen:
-
-- Louvain gyors kontrollként;
-- Infomap, ha az információ- vagy függőségáramlás értelmezése fontos;
-- Label Propagation nagyon nagy gráf gyors becsléséhez;
-- Weakly Connected Components szerkezeti alapfelosztásként.
-
-Ezek ne növeljék az első verzió UI-ját vagy függőségeit; csak az algoritmusmodul interfésze legyen bővíthető.
+Az alkalmazás közösségdetektáló algoritmusa Leiden. Louvain, Infomap, Label
+Propagation és egy általános pluginfelület nem szükséges az egyszeri
+felméréshez. A kontrollt több resolution, több seed, eltérő hub policy és a
+minőségi mutatók összevetése adja.
 
 ## 14. Közösség- és gráfminőségi mutatók
 
@@ -818,8 +760,8 @@ Az irányított forrásgráfon használható a globálisan fontos, sok jelentős
 Azonosítja azokat az objektumokat, amelyek sok legrövidebb útvonalon helyezkednek el. Nagy gráfon a pontos számítás drága, ezért:
 
 - 20 000 node alatt pontos számítás engedhető;
-- fölötte mintavételes/approximált számítás legyen;
-- a mintaméret kerüljön az eredmény konfigurációjába.
+- fölötte determinisztikus mintavételes közelítés használható;
+- az eredmény jelezze, ha közelítés készült.
 
 ### 15.4. Articulation point és bridge edge
 
@@ -969,9 +911,8 @@ GET    /api/export/{exportId}/file
 {
   "schemas": ["SALES", "BILLING", "COMMON"],
   "objectTypes": [],
-  "includeSourceCode": false,
   "resolveExternalReferences": true,
-  "includeSchedulerObjects": false
+  "synonymMaxDepth": 8
 }
 ```
 
@@ -1017,17 +958,15 @@ Az üres `objectTypes` minden látható objektumot jelent. A támogatott logikai
 
 ## 19. Frontend és UX
 
-### 19.1. Képernyők
+### 19.1. Munkaterületek
 
-1. **Kapcsolat és adatgyűjtés:** connection test, elérhető sémák, kiválasztás, scan progress.
-2. **Áttekintő:** objektum- és kapcsolatszámok, schema/type eloszlás, lefedettségi figyelmeztetések.
-3. **Objektumkereső:** név, owner, típus, státusz és wildcard szűrés.
-4. **Gráfböngésző:** részgráf, irány, depth, kapcsolattípus és confidence szűrők.
-5. **Objektumrészlet:** metadata, DDL/forrás ha elérhető, kapcsolatok és evidence.
-6. **Közösségelemzés:** paraméterezés, állapot, futások és mutatók összehasonlítása.
-7. **Közösségi térkép:** összecsukott nézet, drill-down, bridge objektumok.
-8. **Hatáselemzés és útvonal:** célzott kétlépcsős munkafolyamat.
-9. **Export:** aktuális nézet vagy teljes elemzési eredmény.
+Nem szükséges külön route- és képernyőrendszer minden funkcióhoz. Egyetlen
+áttekinthető oldalon négy munkaterület elegendő:
+
+1. **Kapcsolat és adatgyűjtés:** connection test, sémaválasztás, scan progress és összesítő.
+2. **Gráfböngésző:** keresés, részgráf, objektum- és kapcsolatrészlet, hatás és útvonal.
+3. **Közösségelemzés:** paraméterezés, futások, mutatók, community map és drill-down.
+4. **Export:** aktuális nézet vagy teljes elemzési eredmény.
 
 ### 19.2. Gráfinterakciók
 
@@ -1039,17 +978,14 @@ Az üres `objectTypes` minden látható objektumot jelent. A támogatott logikai
 - `INVALID` objektum külön kerettel/jelöléssel;
 - bizonytalan él szaggatott vonallal;
 - edge-re kattintva evidence és metadata;
-- közösség izolálása, összecsukása vagy kibontása;
+- közösségi aggregált nézet és drill-down;
 - „Miért került ide?” panel top belső élekkel és külső kapcsolati aránnyal.
 
-### 19.3. Elrendezések
+### 19.3. Elrendezés
 
-- kisebb általános gráf: fCoSE vagy CoSE;
-- függőségi irány: dagre/ELK;
-- közösségi aggregált gráf: fCoSE;
-- nagyobb eredmény: szerveroldalon korlátozott részgráf és opcionálisan cache-elt preset pozíciók.
-
-A layout ne fusson újra minden kisebb stílusváltoztatásnál. A felhasználó külön gombbal indíthassa újra.
+Egy jól működő Cytoscape automatikus elrendezés elegendő. A felhasználó
+node-okat rögzíthet, és külön gombbal újrafuttathatja az elrendezést. Több
+layout engine, szerveroldali pozíciószámítás és pozíciócache nem követelmény.
 
 ### 19.4. Elemzőt segítő UX
 
@@ -1059,7 +995,6 @@ A layout ne fusson újra minden kisebb stílusváltoztatásnál. A felhasználó
 - legjobb és legrosszabb conductance-ű közösségek gyors listája;
 - top hubok és bridge-ek külön rangsora;
 - schema–community mátrix;
-- minden táblázatból közvetlen ugrás a gráfhoz;
 - a paraméterek és eredmények exportálása együtt.
 
 ## 20. Export
@@ -1068,41 +1003,36 @@ Támogatandó formátumok:
 
 - JSON: nodes, edges, analysis config, memberships és metrics;
 - CSV: objektumok, kapcsolatok, közösségtagság, közösségmutatók és centralitás külön fájlokban;
-- SVG/PNG: aktuális vizuális nézet;
-- opcionális GraphML a külső gráfeszközök számára.
+- SVG/PNG: aktuális vizuális nézet.
 
 Az export legyen determinisztikus sorrendű, hogy két manuálisan archivált futás fájlszinten is könnyebben összevethető legyen. Az Oracle-jelszó és connect string érzékeny részei soha ne kerüljenek exportba.
 
 ## 21. Teljesítmény és memória
 
-### 21.1. Méretkategóriák
+### 21.1. Célméret
 
-| Kategória | Node | Nyers él | Megközelítés |
-|---|---:|---:|---|
-| Kicsi | <10k | <100k | teljes memóriás elemzés |
-| Közepes | 10k–100k | 100k–1M | streamelt scan, memóriás igraph |
-| Nagy | 100k–500k | 1M–5M | komponensenkénti elemzés, approximált centralitás |
-| Ennél nagyobb | >500k | >5M | külön benchmark és szigorúbb szűrés szükséges |
+A scanner kötegelt módon ír SQLite-ba, az elemzés pedig a szűrt gráfot
+memóriába tölti. Nincs általános nagygráf-platform cél: ha a céladatbázis nem
+fér el biztonságosan a helyi gépen, owner-, objektumtípus- vagy
+confidence-szűréssel kell szűkíteni. A konfigurálható hard limit ezt a gépet
+védi, nem szolgáltatási SLA-t valósít meg.
 
 ### 21.2. Optimalizálási sorrend
 
 1. Oracle-lekérdezések csak szükséges oszlopokkal és owner filterrel.
-2. `arraysize` és `prefetchrows` méréssel beállítva.
-3. SQLite batch insert tranzakciónként több ezer rekorddal.
-4. Indexek csak a tömeges betöltés után.
-5. Elemzés előtt egyetlen rendezett edge-lista betöltése.
-6. Technikai objektumok kizárása a közösségdetektálásból.
-7. Connected componentenkénti futtatás.
-8. Betweenness approximáció nagy gráfon.
-9. Frontenden részgráf és közösség-összecsukás.
+2. Kötegelt Oracle-olvasás és SQLite-írás.
+3. Elemzés előtt egyetlen rendezett edge-lista betöltése.
+4. Technikai objektumok alapértelmezett kizárása.
+5. Connected componentenkénti Leiden-futtatás.
+6. Frontenden limitált részgráf és közösségi összecsukás.
 
 ### 21.3. Erőforráskorlátok
 
-- maximális scan futási idő konfigurálható, alapból 60 perc;
+- a scan megszakítható és opcionális időlimittel védhető;
 - elemzés maximum node/edge limitje konfigurálható;
 - hard UI-limitek a részgráfokra;
 - memóriahiány esetén az elemzés kontrollált hibával álljon le, az SQLite-adat ne sérüljön;
-- a frontend jelezze az elemzési gráf becsült méretét indítás előtt.
+- a frontend indítás előtt közelítő node/edge méretet jelezzen.
 
 ## 22. Hibakezelés
 
@@ -1111,8 +1041,8 @@ Az export legyen determinisztikus sorrendű, hogy két manuálisan archivált fu
 - hibás hitelesítés: rövid, érthető üzenet és Oracle hibakód;
 - hiányzó nézetjog: részleges capabilities és konkrét hiányzó nézet;
 - kapcsolat megszakadása: scan `FAILED`, előző adathalmaz változatlan;
-- egy extractor nem kritikus hibája: konfiguráció szerint teljes scan hiba vagy warning; alapból a fő objektum/dependency/FK extractor hibája kritikus;
-- timeout: aktuális query és fázis jelzése érzékeny bind értékek nélkül.
+- opcionális katalógusnézet hiánya: warning; a fő objektum/dependency/FK forrás hiánya kontrollált hiba;
+- timeout: az érintett fázis látszódjon a felületen.
 
 ### 22.2. Elemzési hibák
 
@@ -1123,16 +1053,12 @@ Az export legyen determinisztikus sorrendű, hogy két manuálisan archivált fu
 - numerikus centralitási hiba: az adott mutató hibás, a többi eredmény megmaradhat;
 - megszakítás: részleges membership ne váljon sikeres analysis runná.
 
-### 22.3. Helyi naplózás
+### 22.3. Helyi diagnosztika
 
-Egyszerű konzol- és forgó fájllog elegendő. Tartalmazza:
-
-- időpont, szint, művelet és fázis;
-- futási idő és számlálók;
-- Oracle hibakód;
-- elemzés paraméterazonosítója.
-
-Ne tartalmazzon jelszót, teljes connect descriptort vagy PL/SQL forrást.
+A művelet állapota, fázisa, számlálói és rövid hibája a felületen látszik. A
+normál konzolkimenet fejlesztői hibakereséshez elegendő; külön fájllog,
+logrotáció, strukturált auditlog, metrika- vagy tracing-rendszer nem része a
+tervnek. Jelszó és teljes connect descriptor semmilyen kimenetre nem kerülhet.
 
 ## 23. Tesztelési stratégia
 
@@ -1149,36 +1075,30 @@ Ne tartalmazzon jelszót, teljes connect descriptort vagy PL/SQL forrást.
 - útvonalköltség;
 - közösségnév tokenizálása.
 
-### 23.2. Oracle integration tesztek
+### 23.2. Oracle smoke próba
 
-Golden séma tartalmazzon:
+Nem szükséges külön, tartósan üzemeltetett golden Oracle-környezet és minden
+Oracle-objektumtípust lefedő integrációs tesztmátrix. A tényleges felmérés
+előtt egy kis, eldobható próbasémán vagy a célrendszer ismert mintáján elég
+ellenőrizni:
 
-- legalább három sémát;
-- azonos nevű táblát két sémában;
-- sémák közötti FK-t;
-- package spec/body-t;
-- procedure/function hívást;
-- view és materialized view dependency-t;
-- triggert;
-- indexet és összetett FK-t;
-- local és PUBLIC synonymot;
-- synonym láncot és ciklust;
-- sequence-használatot;
-- külső sémára hivatkozást;
-- invalid objektumot;
-- quoted mixed-case objektumot.
+- két owner azonos nevű objektumának elkülönítését;
+- egy sémák közötti dependency vagy FK megőrzését;
+- egy trigger, index és synonym kapcsolatát;
+- egy külső hivatkozás placeholderét.
+
+A scanner lekérdezési és normalizálási logikájának többi ága helyi fixture-ös
+teszttel ellenőrizhető, Oracle-konténer nélkül.
 
 ### 23.3. Gráfalgoritmus-regresszió
 
-Rögzített tesztgráfok:
+Kis, rögzített tesztgráfok:
 
 - két erős közösség egy bridge-dzsel;
 - három közösség közös hubbal;
 - izolált node-ok;
 - párhuzamos és többtípusú élek;
-- irányított ciklus;
-- több disconnected component;
-- egy nagy, gyenge belső szerkezetű közösség;
+- ciklus és több disconnected component;
 - schema-határokat átlépő közösség.
 
 Fix input + konfiguráció + seed esetén ellenőrizendő a membership, quality és fő közösségmutatók. Könyvtárfrissítéskor a változást tudatosan kell felülvizsgálni.
@@ -1186,8 +1106,6 @@ Fix input + konfiguráció + seed esetén ellenőrizendő a membership, quality 
 ### 23.4. SQLite és újrafuttatási tesztek
 
 - üres adatfájl inicializálása;
-- nagy batch insert;
-- indexek létrehozása;
 - `.next.db` sikeres promóciója;
 - Oracle-hiba közben a régi fájl megmaradása;
 - megszakítás közben a régi fájl megmaradása;
@@ -1206,87 +1124,33 @@ Fix input + konfiguráció + seed esetén ellenőrizendő a membership, quality 
 - export;
 - Docker Compose indulás tiszta `data/` könyvtárral.
 
-### 23.6. Felhasználói elfogadási próba
+### 23.6. Gyakorlati elfogadási próba
 
-Az elemző egy reprezentatív adatbázison:
+Az elemző a tényleges céladatbázison végigjárja a rendes munkafolyamatot:
 
-1. önállóan elindítja az alkalmazást;
-2. kiválaszt legalább három sémát;
-3. ellenőriz kézzel 50 objektumot és 100 kapcsolatot;
-4. lefuttat legalább három resolution-profilt;
-5. értelmez legalább tíz közösséget;
-6. azonosít hubokat és bridge objektumokat;
-7. lefuttat egy hatás- és egy útvonalelemzést;
-8. exportálja a végső eredményt.
+1. elindítja az alkalmazást, kapcsolatot tesztel és lefuttat egy scant;
+2. néhány ismert objektumot és kapcsolatot visszaellenőriz az Oracle-ben;
+3. futtat egy alap- és egy összehasonlító közösségelemzést;
+4. megnyit egy közösséget, egy hatáselemzést és egy útvonalat;
+5. exportálja a használni kívánt eredményt.
 
-## 24. Megvalósítási ütemterv
+Nincs előírt objektum-, kapcsolat-, profil- vagy közösségdarabszám: a próba
+célja annak igazolása, hogy a konkrét felmérés elvégezhető.
 
-### 0. fázis – Technikai felmérés (1 hét)
+## 24. Megvalósítási prioritás
 
-- Oracle-verzió, PDB, kiválasztandó sémák és adatmennyiség felmérése.
-- Read-only felhasználó és `ALL_*` hozzáférés ellenőrzése.
-- Thin mód kapcsolatpróba.
-- Objektum- és kapcsolatszám becslése.
-- Kis reprezentatív kivonat és igraph memória-benchmark.
+A terv nem vállalati projektütemezés és nem tartalmaz mesterséges hétbecslést.
+A fejlesztési sorrend a használható eredményhez igazodik:
 
-**Eredmény:** végleges támogatási mátrix és mért célméret.
+1. **Biztos kinyerés:** read-only kapcsolat, többsémás scanner, stabil ID,
+   alapkapcsolatok, placeholder és atomikus SQLite-csere.
+2. **Elemzői érték:** kereshető gráf, hatás/útvonal, Leiden, mutatók,
+   összehasonlítás és community drill-down.
+3. **Átadás:** export, rövid használati útmutató, automatizált regressziós
+   tesztek és egy gyakorlati próba a céladatbázison.
 
-### 1. fázis – Alkalmazásváz és SQLite (1 hét)
-
-- monorepo;
-- Dockerfile és Docker Compose;
-- FastAPI + buildelt React kiszolgálás;
-- `.env` konfiguráció;
-- SQLite-séma és repository réteg;
-- in-process task állapotgép.
-
-**Demo:** alkalmazás egy paranccsal indul, kapcsolatpróba működik.
-
-### 2. fázis – Többsémás Oracle scanner (2 hét)
-
-- capabilities és sémaválasztás;
-- objektum-, dependency-, FK-, trigger-, index- és synonym-extractor;
-- stabil ID, placeholder és evidence;
-- package spec/body összevonás;
-- atomikus `.next.db` publikálás;
-- lefedettségi riport.
-
-**Demo:** több séma közös, konzisztens forrásgráfja.
-
-### 3. fázis – Gráf API és böngésző (2 hét)
-
-- objektumkeresés és facetták;
-- neighbor/subgraph API;
-- Cytoscape gráfnézet;
-- objektum- és edge-detail/evidence;
-- hatáselemzés és útvonalkeresés;
-- limit- és hibakezelés.
-
-**Demo:** keresésből induló interaktív gráffeltárás.
-
-### 4. fázis – Elemzési pipeline (2 hét)
-
-- technikai node policy;
-- súlyozás, confidence, edge aggregation;
-- hubkezelés és szimmetrizálás;
-- Leiden és resolution-sorozat;
-- közösségmutatók;
-- centralitás, bridge, articulation point és k-core.
-
-**Demo:** összehasonlítható, magyarázható közösségi eredmények.
-
-### 5. fázis – Elemzői felület és validáció (1–2 hét)
-
-- közösségi aggregált gráf;
-- paraméter- és futás-összehasonlítás;
-- schema–community nézet;
-- névjavaslat és annotation;
-- JSON/CSV/SVG/PNG export;
-- teljesítményhangolás;
-- golden séma, algoritmusregresszió és felhasználói próba;
-- README és rövid használati útmutató.
-
-**Eredmény:** felmérésre kész, helyben futó alkalmazás.
+Új funkció csak akkor kerül a tervbe, ha a konkrét felméréshez szükséges; az
+általános platformépítés nem önálló cél.
 
 ## 25. Elfogadási kritériumok
 
@@ -1323,40 +1187,38 @@ Az elemző egy reprezentatív adatbázison:
 | Kockázat | Következmény | Mérséklés |
 |---|---|---|
 | Hiányos Oracle katalógusjog | hiányos gráf | capabilities és lefedettségi riport |
-| Dinamikus SQL nem látható | hiányzó kapcsolatok | confidence/origin, opcionális parser, korlát jelzése |
+| Dinamikus SQL nem látható | hiányzó kapcsolatok | ismert korlát jelzése és szükség esetén kézi ellenőrzés |
 | Technikai objektumok torzítanak | félrevezető közösségek | alapértelmezett kizárás/összevonás |
 | Közös hubok összerántják a modulokat | túl nagy közösségek | hubnormalizálás és kontrollfutás |
 | Resolution önkényes | instabil felosztás | preset sorozat, több seed és mutatók |
-| Nagy gráf memóriaigénye | sikertelen elemzés | komponensek, szűrés, approximáció, előzetes becslés |
+| Nagy gráf memóriaigénye | sikertelen elemzés | komponensek, szűrés, hard limit és előzetes becslés |
 | Egyetlen SQLite-fájl sérülése | eredményvesztés | `.next.db`, integrity check és atomikus csere |
 | Közösség tévesen üzleti modulnak tűnik | rossz következtetés | magyarázható mutatók és emberi értelmezés |
 | Synonym/DB link nem oldható fel | hiányos célkapcsolat | placeholder node és warning |
 | Dockerből nem érhető el Oracle | alkalmazás használhatatlan | connection test, hálózati dokumentáció, szükség esetén host gateway |
 
-## 27. Első konkrét lépések
+## 27. Az egyszeri felmérés előkészítése
 
-1. Kijelölni a felmérendő Oracle-adatbázist és legalább három reprezentatív sémát.
-2. Lekérni az Oracle-verziót, PDB/container nevet és a becsült objektumszámokat.
-3. Létrehozni vagy ellenőrizni a read-only metadata felhasználót.
-4. Kipróbálni a `python-oracledb` Thin kapcsolatot Docker konténerből.
-5. Futtatni a fő `ALL_OBJECTS`, `ALL_DEPENDENCIES` és FK lekérdezéseket.
-6. Létrehozni a golden tesztsémát több ownerrel.
-7. Benchmarkolni egy reprezentatív node/edge kivonatot igraph/Leiden alatt.
-8. Rögzíteni az alapértelmezett objektumtípus- és súlyprofilt.
-9. Implementálni az atomikus SQLite-cserét még a teljes scanner előtt.
-10. Az első valós eredményen doménszakértővel kalibrálni a súlyokat és hub policy-t.
+1. Kijelölni a céladatbázist és a felmérendő sémákat.
+2. Létrehozni vagy ellenőrizni a read-only metadata felhasználót.
+3. Kipróbálni a kapcsolatot és ellenőrizni a szükséges `ALL_*` nézeteket.
+4. Lefuttatni a scant, majd néhány ismert objektummal és kapcsolattal
+   visszaellenőrizni a lefedettséget.
+5. Az első értelmezhető eredményen beállítani a súlyokat, hub policy-t és
+   resolutiont, majd exportálni a felmérés eredményét.
 
 ## 28. Hivatalos technikai hivatkozások
 
 - [Oracle – schema object dictionary views](https://docs.oracle.com/en/database/oracle/oracle-database/26/admin/managing-schema-objects.html)
-- [Oracle – DBMS_METADATA használata](https://docs.oracle.com/en/database/oracle/oracle-database/19/sutil/using-oracle-dbms_metadata-api.html)
-- [python-oracledb – Thin és Thick mód inicializálása](https://python-oracledb.readthedocs.io/en/stable/user_guide/initialization.html)
+- [python-oracledb – kapcsolatkezelés](https://python-oracledb.readthedocs.io/en/stable/user_guide/connection_handling.html)
 - [python-igraph – Graph API és Leiden](https://igraph.org/python/versions/latest/api/igraph.Graph.html)
-- [leidenalg – resolution profile](https://leidenalg.readthedocs.io/en/latest/reference.html)
 - [Cytoscape.js – hivatalos dokumentáció](https://js.cytoscape.org/)
 
 ## 29. Összegzés
 
-A megoldás szándékosan egyszerű futtatási és tárolási modellt használ: egy Docker Compose szolgáltatás, egy FastAPI backend, egy React frontend és egyetlen SQLite-fájl. Ez elhagyja a többfelhasználós és vállalati üzemeltetési rétegeket, de nem egyszerűsíti le a felmérés szakmai magját.
+A megoldás szándékosan egyszerű futtatási és tárolási modellt használ: egy
+alkalmazáskonténerben futó FastAPI backend és React frontend, valamint egyetlen
+SQLite-fájl. Ez elhagyja a többfelhasználós és vállalati üzemeltetési
+rétegeket, de nem egyszerűsíti le a felmérés szakmai magját.
 
 A rendszer értékét a megbízható több-sémás Oracle-kinyerés, a bizonyítékokkal ellátott forrásgráf, a konfigurálható elemzési gráf és a magyarázható közösségdetektálás együtt adja. Az alkalmazás akkor tekinthető sikeresnek, ha az elemző nemcsak egy látványos hálózatot kap, hanem meg tudja válaszolni: mely objektumok tartoznak szorosan össze, miért kerültek egy csoportba, mennyire különülnek el, mely elemek kötik össze a csoportokat, és milyen függőségi következményekkel járhat egy objektum módosítása.

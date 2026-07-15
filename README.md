@@ -106,6 +106,6 @@ A stabilitási címke alapértelmezett küszöbei: `STABLE ≥ 0,80`, `MIXED ≥
 
 ## Következő mérföldkő
 
-Az 5. fázis fennmaradó validációs és hardening feladatai következnek: a becslési memóriaformula valós Oracle-adathalmazokon történő kalibrálása, golden Oracle séma és szélesebb algoritmusregresszió, Docker Compose tiszta-adatkönyvtár próba, valamint a reprezentatív Oracle-adatbázison végrehajtott felhasználói elfogadási forgatókönyv. A részletes terv funkcionális elemei elkészültek; a felmérésre kész állapot igazolásához ezek a környezeti és elfogadási próbák szükségesek.
+A funkcionális mag elkészült. A hátralévő munka a helyi, egyszeri használathoz igazított átadás: Docker Compose indítás tiszta `data/` könyvtárral, egy kis Oracle smoke próba, majd a tényleges céladatbázison a kapcsolat → scan → kézi kontrollminta → elemzés → export munkafolyamat végigjárása. Külön golden Oracle-környezet, általános nagygráf-benchmark, tartós fájllog vagy vállalati üzemeltetési réteg nem része a scope-nak.
 
 Részletes terv: [oracle-adatbazis-graf-megvalositasi-terv.md](oracle-adatbazis-graf-megvalositasi-terv.md)
