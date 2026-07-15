@@ -12,6 +12,7 @@ from app.config import Settings, get_settings
 from app.errors import install_error_handlers
 from app.persistence.database import initialize_database
 from app.persistence.repositories import ScanStatusRepository
+from app.persistence.analysis_repository import AnalysisRepository
 from app.tasks.manager import TaskManager
 
 
@@ -22,6 +23,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         resolved_settings.app_data_dir.mkdir(parents=True, exist_ok=True)
         initialize_database(resolved_settings.database_path)
+        AnalysisRepository(resolved_settings.database_path).recover_interrupted()
         app.state.task_manager.persist_initial_state()
         yield
         await app.state.task_manager.shutdown()
@@ -33,6 +35,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = resolved_settings
     app.state.task_manager = TaskManager(ScanStatusRepository(resolved_settings.database_path))
+    app.state.active_analysis_ids = set()
     app.add_middleware(
         CORSMiddleware,
         allow_origins=resolved_settings.app_cors_origins,

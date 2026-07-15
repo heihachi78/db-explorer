@@ -13,10 +13,17 @@ import { StatusPill } from "./components/StatusPill";
 const GraphExplorer = lazy(() => import("./components/GraphExplorer").then(
   (module) => ({ default: module.GraphExplorer }),
 ));
+const AnalysisPanel = lazy(() => import("./components/AnalysisPanel").then(
+  (module) => ({ default: module.AnalysisPanel }),
+));
 
 const ACTIVE_SCAN_STATES = new Set([
   "CONNECTING", "DISCOVERING_SCHEMAS", "EXTRACTING_OBJECTS",
   "EXTRACTING_RELATIONSHIPS", "NORMALIZING", "VALIDATING", "PUBLISHING",
+]);
+const ACTIVE_ANALYSIS_STATES = new Set([
+  "PREPARING_ANALYSIS", "DETECTING_COMMUNITIES",
+  "CALCULATING_METRICS", "SAVING_RESULTS",
 ]);
 
 function App() {
@@ -117,7 +124,14 @@ function App() {
   }
 
   const scanActive = Boolean(scanStatus && ACTIVE_SCAN_STATES.has(scanStatus.state));
-  const scanSucceeded = scanStatus?.state === "SUCCEEDED";
+  const analysisActive = Boolean(scanStatus && ACTIVE_ANALYSIS_STATES.has(scanStatus.state));
+  const lastOperationWasAnalysis = Boolean(
+    scanStatus?.phase && ACTIVE_ANALYSIS_STATES.has(scanStatus.phase),
+  );
+  const scanSucceeded = scanStatus?.state === "SUCCEEDED" && !lastOperationWasAnalysis;
+  const scanDisplayState = analysisActive
+    ? "ELEMZÉS FUT"
+    : lastOperationWasAnalysis ? "IDLE" : scanStatus?.state ?? "IDLE";
   const objectCount = scanSummary
     ? Object.values(scanSummary.objectTypeCounts).reduce((total, count) => total + count, 0)
     : 0;
@@ -219,8 +233,8 @@ function App() {
           <div className="scan-heading">
             <span className="scan-number">02</span>
             <div><p className="overline">Metaadatgyűjtés</p><h3>Többsémás forrásgráf</h3></div>
-            <StatusPill ok={scanStatus?.state === "SUCCEEDED"}>
-              {scanStatus?.state ?? "IDLE"}
+            <StatusPill ok={scanSucceeded}>
+              {scanDisplayState}
             </StatusPill>
           </div>
           <div className="scan-actions">
@@ -228,11 +242,11 @@ function App() {
             <button
               className="primary-button"
               onClick={startScan}
-              disabled={selectedSchemas.length === 0 || scanActive || loading}
+              disabled={selectedSchemas.length === 0 || scanActive || analysisActive || loading}
             >Adatgyűjtés indítása</button>
             {scanActive && <button className="secondary-button" onClick={cancelScan}>Megszakítás</button>}
           </div>
-          {scanStatus && scanStatus.state !== "IDLE" && (
+          {scanStatus && (scanActive || scanSucceeded) && (
             <div className="scan-progress" aria-live="polite">
               {!scanSucceeded && (
                 <div><span>{scanStatus.phase}</span><strong>{scanStatus.message}</strong></div>
@@ -247,6 +261,7 @@ function App() {
               {scanStatus.error_message && <p className="warning">{scanStatus.error_message}</p>}
             </div>
           )}
+          {analysisActive && <p className="operation-note">Közösségelemzés fut; új adatgyűjtés csak a befejezése után indítható.</p>}
           {scanSummary && (
             <div className="scan-summary">
               <div><span>Objektum</span><strong>{objectCount.toLocaleString("hu-HU")}</strong></div>
@@ -258,6 +273,9 @@ function App() {
         </section>
         <Suspense fallback={<div className="explorer-loading">Gráfböngésző betöltése…</div>}>
           <GraphExplorer />
+        </Suspense>
+        <Suspense fallback={<div className="explorer-loading">Elemzőfelület betöltése…</div>}>
+          <AnalysisPanel operationActive={scanActive || analysisActive} />
         </Suspense>
       </main>
     </div>

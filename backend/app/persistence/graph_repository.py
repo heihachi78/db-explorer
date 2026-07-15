@@ -121,6 +121,16 @@ class GraphRepository:
             ).fetchone()
         return GraphNode.from_row(row) if row else None
 
+    def load_source_graph(self) -> tuple[list[GraphNode], list[GraphEdge]]:
+        """Load the normalized raw graph once for CPU-heavy analysis."""
+        with database(self.path, read_only=True) as connection:
+            node_rows = connection.execute("SELECT * FROM objects ORDER BY id").fetchall()
+            edge_rows = connection.execute("SELECT * FROM relationships ORDER BY id").fetchall()
+        return (
+            [GraphNode.from_row(row) for row in node_rows],
+            [GraphEdge.from_row(row) for row in edge_rows],
+        )
+
     def get_objects(self, object_ids: Iterable[str]) -> list[GraphNode]:
         ids = tuple(dict.fromkeys(object_ids))
         if not ids:

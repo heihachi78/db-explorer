@@ -1,0 +1,288 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from app.analysis.models import AnalysisConfig, AnalysisResult
+from app.graph.models import GraphNode
+
+from .database import database
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+class AnalysisRepository:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def create(self, analysis_id: str, config: AnalysisConfig) -> None:
+        with database(self.path) as connection:
+            connection.execute(
+                """
+                INSERT INTO analysis_runs (
+                    id, name, status, algorithm, config_json, created_at
+                ) VALUES (?, ?, 'QUEUED', ?, ?, ?)
+                """,
+                (analysis_id, config.name, config.algorithm, _json(config.to_api()), _now()),
+            )
+            connection.commit()
+
+    def mark_running(self, analysis_id: str) -> bool:
+        with database(self.path) as connection:
+            cursor = connection.execute(
+                """
+                UPDATE analysis_runs SET status = 'RUNNING', started_at = ?
+                WHERE id = ? AND status = 'QUEUED'
+                """,
+                (_now(), analysis_id),
+            )
+            connection.commit()
+        return cursor.rowcount > 0
+
+    def recover_interrupted(self) -> int:
+        with database(self.path) as connection:
+            cursor = connection.execute(
+                """
+                UPDATE analysis_runs
+                SET status = 'CANCELLED',
+                    error_message = 'Application stopped before the analysis completed.',
+                    finished_at = ?
+                WHERE status IN ('QUEUED', 'RUNNING')
+                """,
+                (_now(),),
+            )
+            connection.commit()
+        return cursor.rowcount
+
+    def save_success(self, analysis_id: str, result: AnalysisResult) -> bool:
+        with database(self.path) as connection:
+            try:
+                connection.execute("BEGIN")
+                connection.executemany(
+                    """
+                    INSERT INTO analysis_membership (
+                        analysis_id, object_id, community_id, stability
+                    ) VALUES (?, ?, ?, NULL)
+                    """,
+                    [
+                        (analysis_id, object_id, community_id)
+                        for object_id, community_id in sorted(result.membership.items())
+                    ],
+                )
+                connection.executemany(
+                    """
+                    INSERT INTO community_metrics (analysis_id, community_id, metrics_json)
+                    VALUES (?, ?, ?)
+                    """,
+                    [
+                        (analysis_id, community_id, _json(metrics))
+                        for community_id, metrics in sorted(result.community_metrics.items())
+                    ],
+                )
+                connection.executemany(
+                    """
+                    INSERT INTO community_edges (
+                        analysis_id, source_community, target_community,
+                        edge_count, total_weight, metadata_json
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            analysis_id, edge["sourceCommunity"], edge["targetCommunity"],
+                            edge["edgeCount"], edge["totalWeight"],
+                            _json({
+                                "relationshipTypeDistribution": edge["relationshipTypeDistribution"],
+                                "bridgePairs": edge["bridgePairs"],
+                            }),
+                        )
+                        for edge in result.community_edges
+                    ],
+                )
+                connection.executemany(
+                    """
+                    INSERT INTO centrality_results (
+                        analysis_id, object_id, metric, value, metadata_json
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            analysis_id, row["objectId"], row["metric"], row["value"],
+                            _json(row["metadata"]),
+                        )
+                        for row in result.centrality_results
+                    ],
+                )
+                cursor = connection.execute(
+                    """
+                    UPDATE analysis_runs
+                    SET status = 'SUCCEEDED', result_summary_json = ?, finished_at = ?
+                    WHERE id = ? AND status = 'RUNNING'
+                    """,
+                    (_json(result.summary), _now(), analysis_id),
+                )
+                if cursor.rowcount == 0:
+                    connection.rollback()
+                    return False
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+        return True
+
+    def mark_terminal(self, analysis_id: str, status: str, error_message: str | None = None) -> None:
+        with database(self.path) as connection:
+            connection.execute(
+                """
+                UPDATE analysis_runs
+                SET status = ?, error_message = ?, finished_at = ?
+                WHERE id = ? AND status IN ('QUEUED', 'RUNNING')
+                """,
+                (status, error_message, _now(), analysis_id),
+            )
+            connection.commit()
+
+    @staticmethod
+    def _run_to_api(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "status": row["status"],
+            "algorithm": row["algorithm"],
+            "config": json.loads(row["config_json"]),
+            "summary": json.loads(row["result_summary_json"]) if row["result_summary_json"] else None,
+            "errorMessage": row["error_message"],
+            "createdAt": row["created_at"],
+            "startedAt": row["started_at"],
+            "finishedAt": row["finished_at"],
+        }
+
+    def list(self) -> list[dict[str, Any]]:
+        with database(self.path, read_only=True) as connection:
+            rows = connection.execute(
+                "SELECT * FROM analysis_runs ORDER BY created_at DESC, id DESC"
+            ).fetchall()
+        return [self._run_to_api(row) for row in rows]
+
+    def get(self, analysis_id: str) -> dict[str, Any] | None:
+        with database(self.path, read_only=True) as connection:
+            row = connection.execute(
+                "SELECT * FROM analysis_runs WHERE id = ?", (analysis_id,)
+            ).fetchone()
+        return self._run_to_api(row) if row else None
+
+    def delete(self, analysis_id: str) -> bool:
+        with database(self.path) as connection:
+            cursor = connection.execute(
+                "DELETE FROM analysis_runs WHERE id = ? AND status NOT IN ('QUEUED', 'RUNNING')",
+                (analysis_id,),
+            )
+            connection.commit()
+        return cursor.rowcount > 0
+
+    def discard_queued(self, analysis_id: str) -> None:
+        with database(self.path) as connection:
+            connection.execute(
+                "DELETE FROM analysis_runs WHERE id = ? AND status = 'QUEUED'",
+                (analysis_id,),
+            )
+            connection.commit()
+
+    def communities(self, analysis_id: str) -> list[dict[str, Any]]:
+        with database(self.path, read_only=True) as connection:
+            rows = connection.execute(
+                """
+                SELECT cm.community_id, cm.metrics_json, a.name AS annotation_name,
+                       a.note AS annotation_note
+                FROM community_metrics cm
+                LEFT JOIN annotations a
+                  ON a.analysis_id = cm.analysis_id AND a.community_id = cm.community_id
+                WHERE cm.analysis_id = ?
+                ORDER BY json_extract(cm.metrics_json, '$.nodeCount') DESC, cm.community_id
+                """,
+                (analysis_id,),
+            ).fetchall()
+        return [
+            json.loads(row["metrics_json"]) | {
+                "annotation": {
+                    "name": row["annotation_name"], "note": row["annotation_note"],
+                } if row["annotation_name"] is not None or row["annotation_note"] is not None else None
+            }
+            for row in rows
+        ]
+
+    def community(self, analysis_id: str, community_id: int) -> dict[str, Any] | None:
+        with database(self.path, read_only=True) as connection:
+            metrics_row = connection.execute(
+                """
+                SELECT metrics_json FROM community_metrics
+                WHERE analysis_id = ? AND community_id = ?
+                """,
+                (analysis_id, community_id),
+            ).fetchone()
+            if metrics_row is None:
+                return None
+            node_rows = connection.execute(
+                """
+                SELECT o.*
+                FROM analysis_membership am
+                JOIN objects o ON o.id = am.object_id
+                WHERE am.analysis_id = ? AND am.community_id = ?
+                ORDER BY o.owner, o.name, o.object_type, o.id
+                """,
+                (analysis_id, community_id),
+            ).fetchall()
+            centrality_rows = connection.execute(
+                """
+                SELECT object_id, metric, value
+                FROM centrality_results
+                WHERE analysis_id = ? AND object_id IN (
+                    SELECT object_id FROM analysis_membership
+                    WHERE analysis_id = ? AND community_id = ?
+                )
+                ORDER BY object_id, metric
+                """,
+                (analysis_id, analysis_id, community_id),
+            ).fetchall()
+        centrality: dict[str, dict[str, float]] = {}
+        for row in centrality_rows:
+            centrality.setdefault(row["object_id"], {})[row["metric"]] = row["value"]
+        return {
+            "metrics": json.loads(metrics_row["metrics_json"]),
+            "nodes": [
+                GraphNode.from_row(row).to_api() | {"centrality": centrality.get(row["id"], {})}
+                for row in node_rows
+            ],
+        }
+
+    def community_graph(self, analysis_id: str) -> dict[str, Any]:
+        communities = self.communities(analysis_id)
+        with database(self.path, read_only=True) as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM community_edges
+                WHERE analysis_id = ? ORDER BY source_community, target_community
+                """,
+                (analysis_id,),
+            ).fetchall()
+        return {
+            "nodes": communities,
+            "edges": [
+                {
+                    "sourceCommunity": row["source_community"],
+                    "targetCommunity": row["target_community"],
+                    "edgeCount": row["edge_count"],
+                    "totalWeight": row["total_weight"],
+                    "metadata": json.loads(row["metadata_json"]),
+                }
+                for row in rows
+            ],
+        }

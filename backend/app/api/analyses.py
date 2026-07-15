@@ -1,0 +1,224 @@
+import asyncio
+import threading
+import uuid
+from dataclasses import replace
+
+import igraph
+from fastapi import APIRouter, Request, status
+
+from app.analysis.models import AnalysisConfig, DEFAULT_EDGE_WEIGHTS, DEFAULT_OBJECT_TYPES
+from app.analysis.service import AnalysisCancelled, AnalysisService
+from app.api.models import AnalysisCompareRequest, AnalysisRequest, ResolutionProfileRequest
+from app.errors import AppError
+from app.persistence.analysis_repository import AnalysisRepository
+from app.persistence.graph_repository import GraphRepository
+from app.tasks.models import TaskState
+
+
+router = APIRouter(prefix="/analyses", tags=["analyses"])
+
+
+def _repository(request: Request) -> AnalysisRepository:
+    return AnalysisRepository(request.app.state.settings.database_path)
+
+
+def _require_run(repository: AnalysisRepository, analysis_id: str) -> dict:
+    run = repository.get(analysis_id)
+    if run is None:
+        raise AppError(
+            "ANALYSIS_NOT_FOUND",
+            "A kért elemzési futás nem található.",
+            status_code=404,
+            details={"analysisId": analysis_id},
+        )
+    return run
+
+
+def _config(payload: AnalysisRequest) -> AnalysisConfig:
+    return AnalysisConfig(
+        name=payload.name,
+        algorithm=payload.algorithm,
+        objective=payload.objective,
+        resolution=payload.resolution,
+        seed=payload.seed,
+        iterations=payload.iterations,
+        object_types=tuple(payload.objectTypes or DEFAULT_OBJECT_TYPES),
+        owners=tuple(payload.owners),
+        minimum_confidence=payload.minimumConfidence,
+        minimum_community_size=payload.minimumCommunitySize,
+        edge_weights=DEFAULT_EDGE_WEIGHTS | payload.edgeWeights,
+        parallel_edge_weight_cap=payload.parallelEdgeWeightCap,
+        hub_policy=payload.hubPolicy,
+        direction_policy=payload.directionPolicy,
+        include_technical_objects=payload.includeTechnicalObjects,
+        igraph_version=igraph.__version__,
+    )
+
+
+async def _start_configs(configs: list[AnalysisConfig], request: Request) -> list[str]:
+    manager = request.app.state.task_manager
+    if manager.active:
+        raise AppError(
+            "OPERATION_IN_PROGRESS",
+            "Another long-running operation is already in progress.",
+            status_code=409,
+        )
+    repository = _repository(request)
+    analysis_ids = [str(uuid.uuid4()) for _ in configs]
+    for analysis_id, config in zip(analysis_ids, configs, strict=True):
+        repository.create(analysis_id, config)
+    request.app.state.active_analysis_ids = set(analysis_ids)
+
+    async def operation(task_manager) -> None:
+        cancelled = threading.Event()
+        service = AnalysisService(
+            GraphRepository(request.app.state.settings.database_path),
+            repository,
+        )
+
+        def run_all() -> None:
+            for analysis_id, config in zip(analysis_ids, configs, strict=True):
+                if cancelled.is_set():
+                    raise AnalysisCancelled("Analysis profile was cancelled.")
+                service.run(analysis_id, config, task_manager.update, cancelled)
+
+        worker = asyncio.create_task(asyncio.to_thread(run_all))
+        try:
+            await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            cancelled.set()
+            try:
+                await asyncio.shield(worker)
+            except AnalysisCancelled:
+                pass
+            for analysis_id in analysis_ids:
+                repository.mark_terminal(analysis_id, "CANCELLED")
+            raise
+        except Exception as error:
+            for analysis_id in analysis_ids:
+                repository.mark_terminal(analysis_id, "FAILED", str(error))
+            raise
+        finally:
+            request.app.state.active_analysis_ids.difference_update(analysis_ids)
+
+    try:
+        await manager.start(operation, initial_state=TaskState.PREPARING_ANALYSIS)
+    except BaseException:
+        for analysis_id in analysis_ids:
+            repository.discard_queued(analysis_id)
+        request.app.state.active_analysis_ids.difference_update(analysis_ids)
+        raise
+    return analysis_ids
+
+
+@router.post("", status_code=status.HTTP_202_ACCEPTED)
+async def start_analysis(payload: AnalysisRequest, request: Request) -> dict:
+    analysis_ids = await _start_configs([_config(payload)], request)
+    analysis_id = analysis_ids[0]
+    return {"accepted": True, "analysisId": analysis_id}
+
+
+@router.post("/resolution-profile", status_code=status.HTTP_202_ACCEPTED)
+async def start_resolution_profile(payload: ResolutionProfileRequest, request: Request) -> dict:
+    configs = []
+    for resolution in payload.resolutions:
+        config = _config(payload)
+        configs.append(replace(
+            config,
+            name=f"{payload.name} · r={resolution:g}",
+            resolution=resolution,
+        ))
+    analysis_ids = await _start_configs(configs, request)
+    return {"accepted": True, "analysisIds": analysis_ids}
+
+
+@router.get("")
+def list_analyses(request: Request) -> dict:
+    return {"items": _repository(request).list()}
+
+
+@router.post("/compare")
+def compare_analyses(payload: AnalysisCompareRequest, request: Request) -> dict:
+    repository = _repository(request)
+    runs = [_require_run(repository, analysis_id) for analysis_id in payload.analysisIds]
+    if any(run["status"] != "SUCCEEDED" for run in runs):
+        raise AppError(
+            "ANALYSIS_NOT_COMPLETE",
+            "Csak sikeresen befejezett elemzések hasonlíthatók össze.",
+            status_code=409,
+        )
+    return {
+        "items": [
+            {
+                "id": run["id"], "name": run["name"],
+                "config": run["config"], "summary": run["summary"],
+            }
+            for run in runs
+        ]
+    }
+
+
+@router.get("/{analysis_id}")
+def get_analysis(analysis_id: str, request: Request) -> dict:
+    return _require_run(_repository(request), analysis_id)
+
+
+@router.post("/{analysis_id}/cancel", status_code=status.HTTP_202_ACCEPTED)
+async def cancel_analysis(analysis_id: str, request: Request) -> dict:
+    repository = _repository(request)
+    run = _require_run(repository, analysis_id)
+    if run["status"] not in {"QUEUED", "RUNNING"} or analysis_id not in request.app.state.active_analysis_ids:
+        raise AppError(
+            "ANALYSIS_NOT_RUNNING",
+            "Az elemzési futás nincs folyamatban.",
+            status_code=409,
+        )
+    await request.app.state.task_manager.cancel()
+    for active_id in tuple(request.app.state.active_analysis_ids):
+        repository.mark_terminal(active_id, "CANCELLED")
+    request.app.state.active_analysis_ids.clear()
+    return {"accepted": True}
+
+
+@router.delete("/{analysis_id}")
+def delete_analysis(analysis_id: str, request: Request) -> dict:
+    repository = _repository(request)
+    _require_run(repository, analysis_id)
+    if not repository.delete(analysis_id):
+        raise AppError(
+            "ANALYSIS_RUNNING",
+            "Folyamatban lévő elemzés nem törölhető.",
+            status_code=409,
+        )
+    return {"deleted": True}
+
+
+@router.get("/{analysis_id}/communities")
+def list_communities(analysis_id: str, request: Request) -> dict:
+    repository = _repository(request)
+    run = _require_run(repository, analysis_id)
+    if run["status"] != "SUCCEEDED":
+        raise AppError("ANALYSIS_NOT_COMPLETE", "Az elemzés még nem fejeződött be.", status_code=409)
+    return {"items": repository.communities(analysis_id)}
+
+
+@router.get("/{analysis_id}/communities/{community_id}")
+def get_community(analysis_id: str, community_id: int, request: Request) -> dict:
+    repository = _repository(request)
+    _require_run(repository, analysis_id)
+    community = repository.community(analysis_id, community_id)
+    if community is None:
+        raise AppError(
+            "COMMUNITY_NOT_FOUND", "A kért közösség nem található.", status_code=404,
+            details={"analysisId": analysis_id, "communityId": community_id},
+        )
+    return community
+
+
+@router.get("/{analysis_id}/community-graph")
+def get_community_graph(analysis_id: str, request: Request) -> dict:
+    repository = _repository(request)
+    run = _require_run(repository, analysis_id)
+    if run["status"] != "SUCCEEDED":
+        raise AppError("ANALYSIS_NOT_COMPLETE", "Az elemzés még nem fejeződött be.", status_code=409)
+    return repository.community_graph(analysis_id)

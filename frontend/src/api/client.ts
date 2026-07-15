@@ -108,6 +108,56 @@ export interface PathResult {
   truncated: boolean;
 }
 
+export interface AnalysisSummary {
+  algorithm: string;
+  objective: string;
+  resolution: number;
+  quality: number;
+  communityCount: number;
+  communitySizes: number[];
+  singletonCount: number;
+  smallCommunityCount: number;
+  isolatedNodeCount: number;
+  sharedInfrastructureCount: number;
+  internalWeightRatio: number;
+  averageConductance: number;
+  medianConductance: number;
+  schemaPurity: number;
+  runtimeSeconds: number;
+  pipelineCounts: Record<string, number>;
+}
+
+export interface AnalysisRun {
+  id: string;
+  name: string;
+  status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+  algorithm: string;
+  config: Record<string, unknown>;
+  summary: AnalysisSummary | null;
+  errorMessage: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface CommunityMetrics {
+  communityId: number;
+  nodeCount: number;
+  internalEdgeCount: number;
+  externalEdgeCount: number;
+  internalWeight: number;
+  externalWeight: number;
+  internalDensity: number;
+  externalRatio: number;
+  conductance: number;
+  coverage: number;
+  schemaDistribution: Record<string, number>;
+  dominantSchema: string;
+  dominantSchemaRatio: number;
+  objectTypeDistribution: Record<string, number>;
+  warnings: string[];
+}
+
 interface ApiErrorBody {
   code?: string;
   message?: string;
@@ -199,4 +249,43 @@ export const api = {
     method: "POST",
     body: JSON.stringify(payload),
   }),
+  analyses: async () => {
+    const result = await request<{ items?: AnalysisRun[] }>("/analyses");
+    return result.items ?? [];
+  },
+  startAnalysis: (payload: {
+    name: string;
+    objective: "CPM" | "MODULARITY";
+    resolution: number;
+    seed: number;
+    minimumConfidence: number;
+    hubPolicy: "NONE" | "DEGREE_NORMALIZATION" | "EXCLUDE_TOP_HUBS";
+    includeTechnicalObjects: boolean;
+  }) => request<{ accepted: boolean; analysisId: string }>("/analyses", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }),
+  startResolutionProfile: (payload: {
+    name: string;
+    objective: "CPM" | "MODULARITY";
+    seed: number;
+    minimumConfidence: number;
+    hubPolicy: "NONE" | "DEGREE_NORMALIZATION" | "EXCLUDE_TOP_HUBS";
+    includeTechnicalObjects: boolean;
+  }) => request<{ accepted: boolean; analysisIds: string[] }>(
+    "/analyses/resolution-profile",
+    { method: "POST", body: JSON.stringify(payload) },
+  ),
+  cancelAnalysis: (analysisId: string) => request<{ accepted: boolean }>(
+    `/analyses/${analysisId}/cancel`, { method: "POST" },
+  ),
+  deleteAnalysis: (analysisId: string) => request<{ deleted: boolean }>(
+    `/analyses/${analysisId}`, { method: "DELETE" },
+  ),
+  communities: async (analysisId: string) => {
+    const result = await request<{ items: CommunityMetrics[] }>(
+      `/analyses/${analysisId}/communities`,
+    );
+    return result.items;
+  },
 };

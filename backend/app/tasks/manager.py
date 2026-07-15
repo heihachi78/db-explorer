@@ -36,7 +36,12 @@ class TaskManager:
     def persist_initial_state(self) -> None:
         self.repository.save(self._snapshot)
 
-    async def start(self, operation: TaskOperation) -> None:
+    async def start(
+        self,
+        operation: TaskOperation,
+        *,
+        initial_state: TaskState = TaskState.CONNECTING,
+    ) -> None:
         async with self._lock:
             if self.active:
                 raise AppError(
@@ -45,8 +50,8 @@ class TaskManager:
                     status_code=409,
                 )
             self._snapshot = TaskSnapshot(
-                state=TaskState.CONNECTING,
-                phase=TaskState.CONNECTING,
+                state=initial_state,
+                phase=initial_state,
                 started_at=now(),
             )
             self.repository.save(self._snapshot)

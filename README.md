@@ -72,10 +72,18 @@ cd frontend && npm test -- --run && npm run build
 - irány-, kapcsolattípus- és confidence-szűrt, szerveroldalon limitált részgráf API;
 - ciklusbiztos dependents/dependencies hatáselemzés és hopszám- vagy súlyalapú útvonalkeresés;
 - Cytoscape gráfböngésző node/edge detail panellel, impact- és útvonalindítással;
+- külön raw és analysis gráfréteg, owner-/objektumtípus-/confidence-szűréssel és package spec/body elemzési összevonással;
+- konfigurálható kapcsolattípus-súlyozás, párhuzamosél-aggregáció, súlycap, technikai node policy és háromféle hubkezelés;
+- irányított metrikagráf és szimmetrizált közösséggráf, izolált és megosztott infrastruktúra státusszal;
+- komponensenként futó, fix seed mellett reprodukálható Leiden CPM/modularity elemzés és hatpontos resolution profil;
+- közösségi density, conductance, coverage, belső/külső súly, séma- és objektumtípus-eloszlás, valamint schema-határ összesítések;
+- PageRank, weighted strength, in/out degree, betweenness, articulation point, bridge edge és k-core mutatók;
+- atomikusan mentett, megszakítható és újra lekérdezhető elemzési futások, közösségi drill-down és aggregált community graph API;
+- böngészős Leiden-indítás, resolution profil, futáslista, megszakítás/törlés és közösségi eredménytábla;
 - egyszolgáltatásos Docker Compose futtatás, egy Uvicorn workerrel.
 
 ## Következő mérföldkő
 
-Az elemzési pipeline: technikai node policy, package spec/body elemzési összevonás, súlyozás, confidence és párhuzamos edge aggregáció, hubkezelés, szimmetrizálás, majd reprodukálható Leiden-futtatások és közösségmutatók. A scanner további finomítása során készül el a korlátozott mélységű synonym-láncfeloldás; a gráfböngészőben pedig bővülnek az interaktív kapcsolat- és confidence-szűrők.
+Az 5. fázis elemzői és validációs funkciói következnek: az aggregált community graph vizualizációja, resolution- és futás-összehasonlító táblák/görbék, schema–community mátrix, közösségnév-javaslatok és annotációk, többseedes stabilitásvizsgálat, valamint JSON/CSV/SVG/PNG export. Ezzel párhuzamosan készül el a golden Oracle séma és a szélesebb algoritmusregresszió, a teljesítménymérés, a korlátozott mélységű synonym-láncfeloldás és a gráfböngésző további interaktív szűrése.
 
 Részletes terv: [oracle-adatbazis-graf-megvalositasi-terv.md](oracle-adatbazis-graf-megvalositasi-terv.md)
