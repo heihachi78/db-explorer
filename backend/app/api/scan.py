@@ -6,6 +6,7 @@ from fastapi import APIRouter, Request, status
 from app.api.models import ScanRequest
 from app.oracle.connection import credentials_from_settings
 from app.oracle.scanner import OracleScanner, ScanCancelled, ScanOptions, load_scan_summary
+from app.persistence.export_repository import ExportRepository
 
 
 router = APIRouter(prefix="/scan", tags=["scan"])
@@ -62,6 +63,7 @@ async def start_scan(payload: ScanRequest, request: Request) -> dict[str, bool]:
         )
         try:
             await asyncio.shield(worker)
+            ExportRepository(settings.database_path).cleanup_files(settings.export_dir)
         except asyncio.CancelledError:
             with publication_lock:
                 if published.is_set():

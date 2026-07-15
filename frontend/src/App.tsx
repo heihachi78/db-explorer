@@ -23,7 +23,7 @@ const ACTIVE_SCAN_STATES = new Set([
 ]);
 const ACTIVE_ANALYSIS_STATES = new Set([
   "PREPARING_ANALYSIS", "DETECTING_COMMUNITIES",
-  "CALCULATING_METRICS", "SAVING_RESULTS",
+  "CALCULATING_METRICS", "SAVING_RESULTS", "ASSESSING_STABILITY",
 ]);
 
 function App() {
@@ -125,13 +125,18 @@ function App() {
 
   const scanActive = Boolean(scanStatus && ACTIVE_SCAN_STATES.has(scanStatus.state));
   const analysisActive = Boolean(scanStatus && ACTIVE_ANALYSIS_STATES.has(scanStatus.state));
+  const exportActive = scanStatus?.state === "EXPORTING";
   const lastOperationWasAnalysis = Boolean(
     scanStatus?.phase && ACTIVE_ANALYSIS_STATES.has(scanStatus.phase),
   );
-  const scanSucceeded = scanStatus?.state === "SUCCEEDED" && !lastOperationWasAnalysis;
+  const lastOperationWasExport = scanStatus?.phase === "EXPORTING";
+  const scanSucceeded = scanStatus?.state === "SUCCEEDED"
+    && !lastOperationWasAnalysis
+    && !lastOperationWasExport;
   const scanDisplayState = analysisActive
     ? "ELEMZÉS FUT"
-    : lastOperationWasAnalysis ? "IDLE" : scanStatus?.state ?? "IDLE";
+    : exportActive ? "EXPORT FUT"
+    : lastOperationWasAnalysis || lastOperationWasExport ? "IDLE" : scanStatus?.state ?? "IDLE";
   const objectCount = scanSummary
     ? Object.values(scanSummary.objectTypeCounts).reduce((total, count) => total + count, 0)
     : 0;
@@ -242,7 +247,7 @@ function App() {
             <button
               className="primary-button"
               onClick={startScan}
-              disabled={selectedSchemas.length === 0 || scanActive || analysisActive || loading}
+              disabled={selectedSchemas.length === 0 || scanActive || analysisActive || exportActive || loading}
             >Adatgyűjtés indítása</button>
             {scanActive && <button className="secondary-button" onClick={cancelScan}>Megszakítás</button>}
           </div>
@@ -262,6 +267,7 @@ function App() {
             </div>
           )}
           {analysisActive && <p className="operation-note">Közösségelemzés fut; új adatgyűjtés csak a befejezése után indítható.</p>}
+          {exportActive && <p className="operation-note">Export készül; új hosszú művelet csak a befejezése után indítható.</p>}
           {scanSummary && (
             <div className="scan-summary">
               <div><span>Objektum</span><strong>{objectCount.toLocaleString("hu-HU")}</strong></div>
@@ -275,7 +281,7 @@ function App() {
           <GraphExplorer />
         </Suspense>
         <Suspense fallback={<div className="explorer-loading">Elemzőfelület betöltése…</div>}>
-          <AnalysisPanel operationActive={scanActive || analysisActive} />
+          <AnalysisPanel operationActive={scanActive || analysisActive || exportActive} />
         </Suspense>
       </main>
     </div>

@@ -42,6 +42,10 @@ class Settings(BaseSettings):
         return self.app_data_dir / "oracle_graph.next.db"
 
     @property
+    def export_dir(self) -> Path:
+        return self.app_data_dir / "exports"
+
+    @property
     def oracle_configured(self) -> bool:
         return all((self.oracle_user, self.oracle_password, self.oracle_dsn))
 

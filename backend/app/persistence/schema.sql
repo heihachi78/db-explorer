@@ -120,6 +120,19 @@ CREATE TABLE IF NOT EXISTS annotations (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS export_jobs (
+    id TEXT PRIMARY KEY,
+    analysis_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
+    format TEXT NOT NULL,
+    status TEXT NOT NULL,
+    filename TEXT,
+    content_type TEXT,
+    file_path TEXT,
+    error_message TEXT,
+    created_at TEXT NOT NULL,
+    finished_at TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_objects_owner_type_name
     ON objects(owner, object_type, name);
 CREATE INDEX IF NOT EXISTS idx_objects_name ON objects(name);
@@ -132,3 +145,7 @@ CREATE INDEX IF NOT EXISTS idx_membership_object
     ON analysis_membership(analysis_id, object_id);
 CREATE INDEX IF NOT EXISTS idx_community_edges
     ON community_edges(analysis_id, source_community, target_community);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_annotations_community
+    ON annotations(analysis_id, community_id);
+CREATE INDEX IF NOT EXISTS idx_export_jobs_analysis
+    ON export_jobs(analysis_id, created_at);

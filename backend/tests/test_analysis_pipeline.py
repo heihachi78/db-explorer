@@ -3,6 +3,7 @@ import math
 import pytest
 
 from app.analysis.communities import create_undirected_igraph, detect_communities
+from app.analysis.comparison import adjusted_rand_index, compare_memberships, information_scores
 from app.analysis.metrics import assemble_result
 from app.analysis.models import AnalysisConfig
 from app.analysis.preprocessing import build_analysis_graph
@@ -120,6 +121,8 @@ def test_leiden_is_reproducible_and_metrics_describe_two_communities() -> None:
     assert result.summary["communitySizes"] == [3, 3]
     assert result.summary["schemaPurity"] == 1.0
     assert len(result.community_edges) == 1
+    assert result.community_edges[0]["forwardWeight"] == pytest.approx(0.1)
+    assert result.community_edges[0]["reverseWeight"] == 0
     assert all(metrics["internalDensity"] == 1.0 for metrics in result.community_metrics.values())
     assert {row["metric"] for row in result.centrality_results} >= {
         "PAGERANK", "BETWEENNESS", "K_CORE", "ARTICULATION_POINT",
@@ -146,3 +149,41 @@ def test_modularity_quality_is_calculated_for_the_global_partition() -> None:
     )
     assert quality == pytest.approx(expected)
     assert quality == pytest.approx(0.5)
+
+
+def test_partition_comparison_is_label_invariant_and_scores_node_stability() -> None:
+    memberships = [
+        ("first", {"A": 0, "B": 0, "C": 1, "D": 1}),
+        ("second", {"A": 7, "B": 7, "C": 3, "D": 3}),
+    ]
+    edges = [edge("ab", "A", "B"), edge("bc", "B", "C"), edge("cd", "C", "D")]
+
+    comparison = compare_memberships(memberships, edges)
+    pair = comparison["pairwise"][0]
+
+    assert adjusted_rand_index([0, 0, 1, 1], [7, 7, 3, 3]) == 1.0
+    assert information_scores([0, 0, 1, 1], [7, 7, 3, 3]) == pytest.approx((1.0, 0.0))
+    assert information_scores([0, 0, 0, 0], [0, 0, 1, 1]) == pytest.approx((0.0, math.log(2)))
+    assert pair["adjustedRandIndex"] == 1.0
+    assert pair["normalizedMutualInformation"] == 1.0
+    assert pair["variationOfInformation"] == 0.0
+    assert comparison["nodeStability"] == {"A": 1.0, "B": 0.5, "C": 0.5, "D": 1.0}
+    assert [item["label"] for item in comparison["communityStability"]] == ["MIXED", "MIXED"]
+
+
+def test_community_name_suggestion_uses_schema_tokens_and_central_table() -> None:
+    nodes = [
+        node("orders", name="ORDER_HEADER", owner="SALES"),
+        node("items", name="ORDER_ITEM", owner="SALES"),
+        node("api", name="ORDER_API", owner="SALES", object_type="PACKAGE"),
+    ]
+    edges = [edge("one", "orders", "items"), edge("two", "api", "orders")]
+    config = AnalysisConfig(name="names", minimum_confidence=0, hub_policy="NONE")
+    graph = build_analysis_graph(nodes, edges, config)
+    membership, quality = detect_communities(graph, config)
+
+    result = assemble_result(graph, membership, quality, config, 0.01)
+    metrics = next(iter(result.community_metrics.values()))
+
+    assert metrics["suggestedName"] == "SALES / ORDER"
+    assert "központi TABLE: SALES.ORDER_HEADER" in metrics["nameExplanation"]

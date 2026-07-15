@@ -1,5 +1,8 @@
 import sqlite3
 import time
+import json
+import zipfile
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -55,6 +58,15 @@ def _wait_for_analysis(client: TestClient, analysis_id: str) -> dict:
             return run
         time.sleep(0.01)
     raise AssertionError("Analysis did not finish in time")
+
+
+def _wait_for_export(client: TestClient, export_id: str) -> dict:
+    for _ in range(200):
+        job = client.get(f"/api/export/{export_id}/status").json()
+        if job["status"] in {"SUCCEEDED", "FAILED", "CANCELLED"}:
+            return job
+        time.sleep(0.01)
+    raise AssertionError("Export did not finish in time")
 
 
 def test_analysis_api_runs_persists_and_exposes_communities(tmp_path: Path) -> None:
@@ -196,3 +208,93 @@ def test_cancelling_one_profile_run_cancels_the_whole_serial_operation(tmp_path:
 
     assert cancelled.status_code == 202
     assert all(run["status"] == "CANCELLED" for run in runs)
+
+
+def test_seed_profile_persists_stability_and_comparison_scores(tmp_path: Path) -> None:
+    settings = Settings(app_data_dir=tmp_path)
+    _seed_two_communities(settings.database_path)
+
+    with TestClient(create_app(settings)) as client:
+        started = client.post("/api/analyses/seed-profile", json={
+            "name": "Stable domains", "seeds": [42, 43],
+            "minimumConfidence": 0, "hubPolicy": "NONE",
+        })
+        assert started.status_code == 202
+        analysis_ids = started.json()["analysisIds"]
+        runs = [_wait_for_analysis(client, analysis_id) for analysis_id in analysis_ids]
+        baseline_id = started.json()["baselineAnalysisId"]
+        for _ in range(200):
+            baseline = client.get(f"/api/analyses/{baseline_id}").json()
+            if baseline["summary"].get("stability"):
+                break
+            time.sleep(0.01)
+        comparison = client.post("/api/analyses/compare", json={"analysisIds": analysis_ids})
+        communities = client.get(f"/api/analyses/{baseline_id}/communities").json()["items"]
+
+    assert all(run["status"] == "SUCCEEDED" for run in runs)
+    assert baseline["summary"]["stability"]["sharedNodeCount"] == 6
+    assert comparison.status_code == 200
+    assert comparison.json()["agreement"]["pairwise"][0]["adjustedRandIndex"] == 1.0
+    assert all(item["stability"] in {"STABLE", "MIXED", "UNSTABLE"} for item in communities)
+
+
+def test_annotations_are_upserted_and_exposed_in_community_views(tmp_path: Path) -> None:
+    settings = Settings(app_data_dir=tmp_path)
+    _seed_two_communities(settings.database_path)
+
+    with TestClient(create_app(settings)) as client:
+        started = client.post("/api/analyses", json={
+            "minimumConfidence": 0, "hubPolicy": "NONE",
+        })
+        analysis_id = started.json()["analysisId"]
+        assert _wait_for_analysis(client, analysis_id)["status"] == "SUCCEEDED"
+        community_id = client.get(f"/api/analyses/{analysis_id}/communities").json()["items"][0]["communityId"]
+        created = client.post("/api/annotations", json={
+            "analysisId": analysis_id, "communityId": community_id,
+            "name": "Order domain", "note": "Verified by the analyst.",
+        })
+        updated = client.patch(f"/api/annotations/{created.json()['id']}", json={
+            "name": "Sales order domain",
+        })
+        communities = client.get(f"/api/analyses/{analysis_id}/communities").json()["items"]
+        detail = client.get(f"/api/analyses/{analysis_id}/communities/{community_id}").json()
+
+    assert created.status_code == 200
+    assert updated.json()["name"] == "Sales order domain"
+    assert updated.json()["note"] == "Verified by the analyst."
+    assert communities[0]["annotation"]["name"] == "Sales order domain"
+    assert detail["annotation"]["note"] == "Verified by the analyst."
+
+
+def test_deterministic_json_csv_svg_and_png_exports(tmp_path: Path) -> None:
+    settings = Settings(app_data_dir=tmp_path)
+    _seed_two_communities(settings.database_path)
+
+    with TestClient(create_app(settings)) as client:
+        analysis_id = client.post("/api/analyses", json={
+            "name": "Exportálható – közösség", "minimumConfidence": 0, "hubPolicy": "NONE",
+        }).json()["analysisId"]
+        assert _wait_for_analysis(client, analysis_id)["status"] == "SUCCEEDED"
+        downloads = {}
+        for export_format in ("JSON", "CSV", "SVG", "PNG", "JSON"):
+            started = client.post("/api/export", json={
+                "analysisId": analysis_id, "format": export_format,
+            })
+            assert started.status_code == 202
+            job = _wait_for_export(client, started.json()["exportId"])
+            assert job["status"] == "SUCCEEDED", job["errorMessage"]
+            response = client.get(job["downloadUrl"])
+            assert response.status_code == 200
+            downloads.setdefault(export_format, []).append(response.content)
+
+    payload = json.loads(downloads["JSON"][0])
+    assert payload["analysis"]["config"]["minimumConfidence"] == 0
+    assert len(payload["nodes"]) == 6
+    assert downloads["JSON"][0] == downloads["JSON"][1]
+    with zipfile.ZipFile(BytesIO(downloads["CSV"][0])) as archive:
+        assert archive.namelist() == [
+            "objects.csv", "relationships.csv", "memberships.csv",
+            "community_metrics.csv", "centrality.csv", "analysis.json",
+        ]
+    assert downloads["SVG"][0].startswith(b"<svg")
+    assert downloads["PNG"][0].startswith(b"\x89PNG\r\n\x1a\n")

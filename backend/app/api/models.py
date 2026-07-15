@@ -168,3 +168,57 @@ class ResolutionProfileRequest(AnalysisRequest):
         if len(cleaned) < 2:
             raise ValueError("Legalább két különböző resolution érték szükséges.")
         return cleaned
+
+
+class SeedProfileRequest(AnalysisRequest):
+    seeds: list[int] = Field(
+        default_factory=lambda: [42, 43, 44, 45, 46],
+        min_length=2,
+        max_length=10,
+    )
+
+    @field_validator("seeds")
+    @classmethod
+    def unique_seeds(cls, values: list[int]) -> list[int]:
+        cleaned = list(dict.fromkeys(values))
+        if len(cleaned) < 2:
+            raise ValueError("Legalább két különböző seed szükséges.")
+        return cleaned
+
+
+class AnnotationRequest(BaseModel):
+    analysisId: str = Field(min_length=1)
+    communityId: int = Field(ge=0)
+    name: str | None = Field(default=None, max_length=200)
+    note: str | None = Field(default=None, max_length=4_000)
+
+    @field_validator("analysisId")
+    @classmethod
+    def clean_analysis_id(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("name", "note")
+    @classmethod
+    def clean_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+
+class AnnotationPatchRequest(BaseModel):
+    name: str | None = Field(default=None, max_length=200)
+    note: str | None = Field(default=None, max_length=4_000)
+
+    @field_validator("name", "note")
+    @classmethod
+    def clean_patch_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+
+class ExportRequest(BaseModel):
+    analysisId: str = Field(min_length=1)
+    format: Literal["JSON", "CSV", "SVG", "PNG"]

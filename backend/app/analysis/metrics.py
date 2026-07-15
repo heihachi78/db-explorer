@@ -1,4 +1,5 @@
 import statistics
+import re
 from collections import Counter, defaultdict
 from typing import Any
 
@@ -10,6 +11,44 @@ from .models import AnalysisConfig, AnalysisGraph, AnalysisResult
 
 def _rounded(value: float) -> float:
     return round(float(value), 12)
+
+
+NAME_STOPWORDS = {
+    "API", "PKG", "PACKAGE", "TBL", "TABLE", "VIEW", "PROC", "PROCEDURE",
+    "FN", "FUNCTION", "TRG", "TRIGGER", "TYPE", "BODY", "DATA", "COMMON",
+}
+
+
+def _suggest_community_name(
+    graph: AnalysisGraph,
+    node_ids: list[str],
+    dominant_schema: str,
+    internal_strength: Counter[str],
+) -> tuple[str, str]:
+    tokens: Counter[str] = Counter()
+    for node_id in node_ids:
+        node = graph.nodes[node_id]
+        for token in re.split(r"[^A-Z0-9]+", node.name.upper()):
+            if len(token) >= 2 and not token.isdigit() and token not in NAME_STOPWORDS:
+                tokens[token] += 1
+    top_token = next((token for token, _ in tokens.most_common() if token != dominant_schema), None)
+    ranked_nodes = sorted(
+        node_ids,
+        key=lambda node_id: (
+            graph.nodes[node_id].object_type not in {"TABLE", "PACKAGE"},
+            -internal_strength[node_id],
+            graph.nodes[node_id].owner,
+            graph.nodes[node_id].name,
+        ),
+    )
+    central = graph.nodes[ranked_nodes[0]]
+    suggested = f"{dominant_schema} / {top_token}" if top_token else dominant_schema
+    explanation = (
+        f"Domináns séma: {dominant_schema}; "
+        f"leggyakoribb névtoken: {top_token or 'nincs'}; "
+        f"központi {central.object_type}: {central.owner}.{central.name}."
+    )
+    return suggested, explanation
 
 
 def _community_edges(
@@ -30,6 +69,8 @@ def _community_edges(
             "totalWeight": 0.0,
             "relationshipTypeDistribution": Counter(),
             "bridgePairs": [],
+            "rawForwardWeight": 0.0,
+            "rawReverseWeight": 0.0,
         })
         item["edgeCount"] += 1
         item["totalWeight"] += edge.weight
@@ -37,9 +78,26 @@ def _community_edges(
         item["bridgePairs"].append({
             "source": edge.source, "target": edge.target, "weight": edge.weight,
         })
+    for edge in graph.directed_edges:
+        source_community = membership.get(edge.source, -1)
+        target_community = membership.get(edge.target, -1)
+        if source_community < 0 or target_community < 0 or source_community == target_community:
+            continue
+        key = tuple(sorted((source_community, target_community)))
+        item = aggregated.get(key)
+        if item is None:
+            continue
+        field = "rawForwardWeight" if source_community == key[0] else "rawReverseWeight"
+        item[field] += edge.weight
     result = []
     for item in aggregated.values():
         item["totalWeight"] = _rounded(item["totalWeight"])
+        raw_forward = item.pop("rawForwardWeight")
+        raw_reverse = item.pop("rawReverseWeight")
+        raw_total = raw_forward + raw_reverse
+        forward_ratio = raw_forward / raw_total if raw_total else 0.5
+        item["forwardWeight"] = _rounded(item["totalWeight"] * forward_ratio)
+        item["reverseWeight"] = _rounded(item["totalWeight"] - item["forwardWeight"])
         item["relationshipTypeDistribution"] = dict(item["relationshipTypeDistribution"])
         item["bridgePairs"] = sorted(
             item["bridgePairs"], key=lambda pair: (-pair["weight"], pair["source"], pair["target"])
@@ -114,6 +172,9 @@ def calculate_community_metrics(
             warnings.append("CROSS_SCHEMA")
         if conductance > 0.5:
             warnings.append("HIGH_CONDUCTANCE")
+        suggested_name, name_explanation = _suggest_community_name(
+            graph, node_ids, dominant_schema, internal_strength[community_id]
+        )
         results[community_id] = {
             "communityId": community_id,
             "nodeCount": size,
@@ -138,6 +199,8 @@ def calculate_community_metrics(
                 for node_id, strength in external_strength[community_id].most_common(10)
             ],
             "relationshipTypeDistribution": dict(sorted(relationship_types[community_id].items())),
+            "suggestedName": suggested_name,
+            "nameExplanation": name_explanation,
             "stability": "NOT_ASSESSED",
             "warnings": warnings,
         }

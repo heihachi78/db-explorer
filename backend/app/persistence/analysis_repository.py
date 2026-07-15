@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -102,6 +103,8 @@ class AnalysisRepository:
                             _json({
                                 "relationshipTypeDistribution": edge["relationshipTypeDistribution"],
                                 "bridgePairs": edge["bridgePairs"],
+                                "forwardWeight": edge["forwardWeight"],
+                                "reverseWeight": edge["reverseWeight"],
                             }),
                         )
                         for edge in result.community_edges
@@ -219,6 +222,140 @@ class AnalysisRepository:
             for row in rows
         ]
 
+    def membership(self, analysis_id: str) -> dict[str, int]:
+        with database(self.path, read_only=True) as connection:
+            rows = connection.execute(
+                """
+                SELECT object_id, community_id FROM analysis_membership
+                WHERE analysis_id = ? ORDER BY object_id
+                """,
+                (analysis_id,),
+            ).fetchall()
+        return {row["object_id"]: row["community_id"] for row in rows}
+
+    def update_stability(self, analysis_id: str, comparison: dict[str, Any]) -> None:
+        labels = {
+            item["communityId"]: item for item in comparison["communityStability"]
+        }
+        with database(self.path) as connection:
+            try:
+                connection.execute("BEGIN")
+                connection.executemany(
+                    """
+                    UPDATE analysis_membership SET stability = ?
+                    WHERE analysis_id = ? AND object_id = ?
+                    """,
+                    [
+                        (score, analysis_id, object_id)
+                        for object_id, score in comparison["nodeStability"].items()
+                    ],
+                )
+                rows = connection.execute(
+                    """
+                    SELECT community_id, metrics_json FROM community_metrics
+                    WHERE analysis_id = ?
+                    """,
+                    (analysis_id,),
+                ).fetchall()
+                for row in rows:
+                    metrics = json.loads(row["metrics_json"])
+                    stability = labels.get(row["community_id"])
+                    if stability:
+                        metrics["stability"] = stability["label"]
+                        metrics["stabilityScore"] = stability["score"]
+                    connection.execute(
+                        """
+                        UPDATE community_metrics SET metrics_json = ?
+                        WHERE analysis_id = ? AND community_id = ?
+                        """,
+                        (_json(metrics), analysis_id, row["community_id"]),
+                    )
+                run_row = connection.execute(
+                    "SELECT result_summary_json FROM analysis_runs WHERE id = ?",
+                    (analysis_id,),
+                ).fetchone()
+                if run_row and run_row["result_summary_json"]:
+                    summary = json.loads(run_row["result_summary_json"])
+                    summary["stability"] = {
+                        "sharedNodeCount": comparison["sharedNodeCount"],
+                        "pairwise": comparison["pairwise"],
+                        "thresholds": comparison["thresholds"],
+                    }
+                    connection.execute(
+                        "UPDATE analysis_runs SET result_summary_json = ? WHERE id = ?",
+                        (_json(summary), analysis_id),
+                    )
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+
+    def upsert_annotation(
+        self,
+        analysis_id: str,
+        community_id: int,
+        name: str | None,
+        note: str | None,
+    ) -> dict[str, Any] | None:
+        timestamp = _now()
+        with database(self.path) as connection:
+            community = connection.execute(
+                """
+                SELECT 1 FROM community_metrics
+                WHERE analysis_id = ? AND community_id = ?
+                """,
+                (analysis_id, community_id),
+            ).fetchone()
+            if community is None:
+                return None
+            existing = connection.execute(
+                """
+                SELECT id, created_at FROM annotations
+                WHERE analysis_id = ? AND community_id = ?
+                """,
+                (analysis_id, community_id),
+            ).fetchone()
+            annotation_id = existing["id"] if existing else str(uuid.uuid4())
+            created_at = existing["created_at"] if existing else timestamp
+            connection.execute(
+                """
+                INSERT INTO annotations (
+                    id, analysis_id, community_id, name, note, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(analysis_id, community_id) DO UPDATE SET
+                    name = excluded.name, note = excluded.note,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    annotation_id, analysis_id, community_id, name, note,
+                    created_at, timestamp,
+                ),
+            )
+            connection.commit()
+        return {
+            "id": annotation_id,
+            "analysisId": analysis_id,
+            "communityId": community_id,
+            "name": name,
+            "note": note,
+            "createdAt": created_at,
+            "updatedAt": timestamp,
+        }
+
+    def annotation(self, annotation_id: str) -> dict[str, Any] | None:
+        with database(self.path, read_only=True) as connection:
+            row = connection.execute(
+                "SELECT * FROM annotations WHERE id = ?", (annotation_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"], "analysisId": row["analysis_id"],
+            "communityId": row["community_id"], "name": row["name"],
+            "note": row["note"], "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"],
+        }
+
     def community(self, analysis_id: str, community_id: int) -> dict[str, Any] | None:
         with database(self.path, read_only=True) as connection:
             metrics_row = connection.execute(
@@ -252,6 +389,13 @@ class AnalysisRepository:
                 """,
                 (analysis_id, analysis_id, community_id),
             ).fetchall()
+            annotation_row = connection.execute(
+                """
+                SELECT * FROM annotations
+                WHERE analysis_id = ? AND community_id = ?
+                """,
+                (analysis_id, community_id),
+            ).fetchone()
         centrality: dict[str, dict[str, float]] = {}
         for row in centrality_rows:
             centrality.setdefault(row["object_id"], {})[row["metric"]] = row["value"]
@@ -261,6 +405,7 @@ class AnalysisRepository:
                 GraphNode.from_row(row).to_api() | {"centrality": centrality.get(row["id"], {})}
                 for row in node_rows
             ],
+            "annotation": self.annotation(annotation_row["id"]) if annotation_row else None,
         }
 
     def community_graph(self, analysis_id: str) -> dict[str, Any]:
@@ -281,7 +426,7 @@ class AnalysisRepository:
                     "targetCommunity": row["target_community"],
                     "edgeCount": row["edge_count"],
                     "totalWeight": row["total_weight"],
-                    "metadata": json.loads(row["metadata_json"]),
+                    **json.loads(row["metadata_json"]),
                 }
                 for row in rows
             ],

@@ -13,6 +13,7 @@ from app.errors import install_error_handlers
 from app.persistence.database import initialize_database
 from app.persistence.repositories import ScanStatusRepository
 from app.persistence.analysis_repository import AnalysisRepository
+from app.persistence.export_repository import ExportRepository
 from app.tasks.manager import TaskManager
 
 
@@ -24,6 +25,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         resolved_settings.app_data_dir.mkdir(parents=True, exist_ok=True)
         initialize_database(resolved_settings.database_path)
         AnalysisRepository(resolved_settings.database_path).recover_interrupted()
+        export_repository = ExportRepository(resolved_settings.database_path)
+        export_repository.recover_interrupted()
+        export_repository.cleanup_files(resolved_settings.export_dir)
         app.state.task_manager.persist_initial_state()
         yield
         await app.state.task_manager.shutdown()

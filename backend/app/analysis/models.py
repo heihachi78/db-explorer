@@ -47,6 +47,28 @@ class AnalysisConfig:
     application_version: str = "0.1.0"
     igraph_version: str = ""
 
+    @classmethod
+    def from_api(cls, value: dict) -> "AnalysisConfig":
+        return cls(
+            name=value["name"],
+            algorithm=value.get("algorithm", "LEIDEN"),
+            objective=value.get("objective", "CPM"),
+            resolution=float(value.get("resolution", 1.0)),
+            seed=int(value.get("seed", 42)),
+            iterations=int(value.get("iterations", -1)),
+            object_types=tuple(value.get("objectTypes") or DEFAULT_OBJECT_TYPES),
+            owners=tuple(value.get("owners") or ()),
+            minimum_confidence=float(value.get("minimumConfidence", 0.8)),
+            minimum_community_size=int(value.get("minimumCommunitySize", 3)),
+            edge_weights=DEFAULT_EDGE_WEIGHTS | dict(value.get("edgeWeights") or {}),
+            parallel_edge_weight_cap=float(value.get("parallelEdgeWeightCap", 10.0)),
+            hub_policy=value.get("hubPolicy", "DEGREE_NORMALIZATION"),
+            direction_policy=value.get("directionPolicy", "SYMMETRIZE_SUM"),
+            include_technical_objects=bool(value.get("includeTechnicalObjects", False)),
+            application_version=value.get("applicationVersion", "0.1.0"),
+            igraph_version=value.get("igraphVersion", ""),
+        )
+
     def to_api(self) -> dict:
         return {
             "name": self.name,

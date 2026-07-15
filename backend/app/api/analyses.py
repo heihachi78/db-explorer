@@ -7,11 +7,19 @@ import igraph
 from fastapi import APIRouter, Request, status
 
 from app.analysis.models import AnalysisConfig, DEFAULT_EDGE_WEIGHTS, DEFAULT_OBJECT_TYPES
+from app.analysis.comparison import compare_memberships
 from app.analysis.service import AnalysisCancelled, AnalysisService
-from app.api.models import AnalysisCompareRequest, AnalysisRequest, ResolutionProfileRequest
+from app.analysis.preprocessing import build_analysis_graph
+from app.api.models import (
+    AnalysisCompareRequest,
+    AnalysisRequest,
+    ResolutionProfileRequest,
+    SeedProfileRequest,
+)
 from app.errors import AppError
 from app.persistence.analysis_repository import AnalysisRepository
 from app.persistence.graph_repository import GraphRepository
+from app.persistence.export_repository import ExportRepository
 from app.tasks.models import TaskState
 
 
@@ -55,7 +63,12 @@ def _config(payload: AnalysisRequest) -> AnalysisConfig:
     )
 
 
-async def _start_configs(configs: list[AnalysisConfig], request: Request) -> list[str]:
+async def _start_configs(
+    configs: list[AnalysisConfig],
+    request: Request,
+    *,
+    assess_stability: bool = False,
+) -> list[str]:
     manager = request.app.state.task_manager
     if manager.active:
         raise AppError(
@@ -81,6 +94,23 @@ async def _start_configs(configs: list[AnalysisConfig], request: Request) -> lis
                 if cancelled.is_set():
                     raise AnalysisCancelled("Analysis profile was cancelled.")
                 service.run(analysis_id, config, task_manager.update, cancelled)
+            if assess_stability:
+                task_manager.update(
+                    TaskState.ASSESSING_STABILITY,
+                    message="Comparing seed partitions and calculating node stability.",
+                )
+                if cancelled.is_set():
+                    raise AnalysisCancelled("Analysis profile was cancelled.")
+                source_nodes, source_edges = service.graph_repository.load_source_graph()
+                baseline_graph = build_analysis_graph(source_nodes, source_edges, configs[0])
+                comparison = compare_memberships(
+                    [
+                        (analysis_id, repository.membership(analysis_id))
+                        for analysis_id in analysis_ids
+                    ],
+                    baseline_graph.directed_edges,
+                )
+                repository.update_stability(analysis_ids[0], comparison)
 
         worker = asyncio.create_task(asyncio.to_thread(run_all))
         try:
@@ -132,6 +162,20 @@ async def start_resolution_profile(payload: ResolutionProfileRequest, request: R
     return {"accepted": True, "analysisIds": analysis_ids}
 
 
+@router.post("/seed-profile", status_code=status.HTTP_202_ACCEPTED)
+async def start_seed_profile(payload: SeedProfileRequest, request: Request) -> dict:
+    configs = [
+        replace(_config(payload), name=f"{payload.name} · seed={seed}", seed=seed)
+        for seed in payload.seeds
+    ]
+    analysis_ids = await _start_configs(configs, request, assess_stability=True)
+    return {
+        "accepted": True,
+        "analysisIds": analysis_ids,
+        "baselineAnalysisId": analysis_ids[0],
+    }
+
+
 @router.get("")
 def list_analyses(request: Request) -> dict:
     return {"items": _repository(request).list()}
@@ -147,6 +191,21 @@ def compare_analyses(payload: AnalysisCompareRequest, request: Request) -> dict:
             "Csak sikeresen befejezett elemzések hasonlíthatók össze.",
             status_code=409,
         )
+    source_nodes, source_edges = GraphRepository(
+        request.app.state.settings.database_path
+    ).load_source_graph()
+    baseline_graph = build_analysis_graph(
+        source_nodes,
+        source_edges,
+        AnalysisConfig.from_api(runs[0]["config"]),
+    )
+    agreement = compare_memberships(
+        [
+            (analysis_id, repository.membership(analysis_id))
+            for analysis_id in payload.analysisIds
+        ],
+        baseline_graph.directed_edges,
+    )
     return {
         "items": [
             {
@@ -154,7 +213,8 @@ def compare_analyses(payload: AnalysisCompareRequest, request: Request) -> dict:
                 "config": run["config"], "summary": run["summary"],
             }
             for run in runs
-        ]
+        ],
+        "agreement": agreement,
     }
 
 
@@ -184,12 +244,19 @@ async def cancel_analysis(analysis_id: str, request: Request) -> dict:
 def delete_analysis(analysis_id: str, request: Request) -> dict:
     repository = _repository(request)
     _require_run(repository, analysis_id)
+    export_repository = ExportRepository(request.app.state.settings.database_path)
+    export_files = export_repository.files_for_analysis(analysis_id)
     if not repository.delete(analysis_id):
         raise AppError(
             "ANALYSIS_RUNNING",
             "Folyamatban lévő elemzés nem törölhető.",
             status_code=409,
         )
+    export_root = request.app.state.settings.export_dir.resolve()
+    for path in export_files:
+        resolved = path.resolve()
+        if export_root in resolved.parents:
+            resolved.unlink(missing_ok=True)
     return {"deleted": True}
 
 
