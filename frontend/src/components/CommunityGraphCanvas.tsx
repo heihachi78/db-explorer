@@ -2,6 +2,7 @@ import cytoscape, { type Core, type EventObject } from "cytoscape";
 import { useEffect, useRef } from "react";
 
 import type { CommunityGraph } from "../api/client";
+import { exportCurrentView, type ViewExportFormat } from "../graph/viewExport";
 
 
 export function CommunityGraphCanvas({
@@ -16,6 +17,12 @@ export function CommunityGraphCanvas({
 
   function rerunLayout() {
     graphRef.current?.layout({ name: "cose", animate: false, fit: true, padding: 45 }).run();
+  }
+
+  function exportView(format: ViewExportFormat) {
+    if (graphRef.current && containerRef.current) {
+      exportCurrentView(graphRef.current, containerRef.current, "Oracle community map", format);
+    }
   }
 
   useEffect(() => {
@@ -86,7 +93,11 @@ export function CommunityGraphCanvas({
 
   return (
     <div className="community-map-wrap">
-      <button type="button" onClick={rerunLayout}>Elrendezés újrafuttatása</button>
+      <div className="community-map-actions" aria-label="Aktuális közösségi térkép műveletei">
+        <button type="button" onClick={() => exportView("PNG")}>Aktuális térkép PNG</button>
+        <button type="button" onClick={() => exportView("SVG")}>Aktuális térkép SVG</button>
+        <button type="button" onClick={rerunLayout}>Elrendezés újrafuttatása</button>
+      </div>
       <div className="community-map-canvas" ref={containerRef} aria-label="Aggregált közösségi gráf" />
     </div>
   );

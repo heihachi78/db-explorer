@@ -2,6 +2,7 @@ import cytoscape, { type Core, type EventObject } from "cytoscape";
 import { useEffect, useRef } from "react";
 
 import type { GraphEdge, GraphNode } from "../api/client";
+import { exportCurrentView, type ViewExportFormat } from "../graph/viewExport";
 
 interface GraphCanvasProps {
   nodes: GraphNode[];
@@ -38,6 +39,12 @@ const TYPE_SHAPES: Record<string, cytoscape.Css.NodeShape> = {
 export function GraphCanvas({ nodes, edges, onSelectNode, onSelectEdge }: GraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<Core | null>(null);
+
+  function exportView(format: ViewExportFormat) {
+    if (graphRef.current && containerRef.current) {
+      exportCurrentView(graphRef.current, containerRef.current, "Oracle object graph", format);
+    }
+  }
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -137,12 +144,15 @@ export function GraphCanvas({ nodes, edges, onSelectNode, onSelectEdge }: GraphC
 
   return (
     <div className="graph-canvas-shell">
-      <button
-        className="graph-layout-button"
-        type="button"
-        title="A jobb kattintással rögzített node-ok a helyükön maradnak."
-        onClick={() => graphRef.current?.layout({ name: "cose", animate: false, fit: true, padding: 35 }).run()}
-      >Elrendezés újrafuttatása</button>
+      <div className="graph-canvas-actions" aria-label="Aktuális objektumgráf műveletei">
+        <button type="button" onClick={() => exportView("PNG")}>Aktuális nézet PNG</button>
+        <button type="button" onClick={() => exportView("SVG")}>Aktuális nézet SVG</button>
+        <button
+          type="button"
+          title="A jobb kattintással rögzített node-ok a helyükön maradnak."
+          onClick={() => graphRef.current?.layout({ name: "cose", animate: false, fit: true, padding: 35 }).run()}
+        >Elrendezés újrafuttatása</button>
+      </div>
       <div className="graph-canvas" ref={containerRef} aria-label="Objektumgráf" />
     </div>
   );

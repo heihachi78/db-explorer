@@ -74,6 +74,7 @@ cd frontend && npm test -- --run && npm run build
 - ciklusbiztos dependents/dependencies hatáselemzés és hopszám- vagy súlyalapú útvonalkeresés;
 - Cytoscape gráfböngésző node/edge detail panellel, impact- és útvonalindítással, státusz-, kapcsolattípus-, confidence- és külsőobjektum-szűréssel;
 - objektumtípusonként eltérő node-alakok, jobb kattintásos pozíciórögzítés és újrafuttatható gráfelrendezés;
+- a pillanatnyi pan/zoomot és renderelt node-pozíciókat megőrző PNG-, illetve valódi vektoros SVG-nézetexport az objektumgráfból és a közösségi térképből;
 - külön raw és analysis gráfréteg, owner-/objektumtípus-/confidence-szűréssel és package spec/body elemzési összevonással;
 - konfigurálható kapcsolattípus-súlyozás, párhuzamosél-aggregáció, súlycap, technikai node policy és háromféle hubkezelés;
 - irányított metrikagráf és szimmetrizált közösséggráf, izolált és megosztott infrastruktúra státusszal;
@@ -96,12 +97,12 @@ cd frontend && npm test -- --run && npm run build
 2. Jelölj ki legalább két sikeres futást a futáslistában, majd hasonlítsd össze a paramétereket, a közösségszámot, quality/conductance értékeket, valamint az ARI/NMI/VI egyezést.
 3. Nyiss meg egy futást, és használd a community mapet, a schema–community mátrixot és a legjobb/legrosszabb conductance listát. A közösségre kattintva megjelenik a névjavaslat indoklása, a top hubok és bridge-ek.
 4. A javasolt nevet helyi címkével és elemzői megjegyzéssel írhatod felül. Ezek az aktuális SQLite-adathalmazhoz tartoznak, új scan után nem öröklődnek tovább.
-5. A JSON export a konfigurációt, node-okat, kapcsolatokat, tagságokat és mutatókat együtt tartalmazza; a CSV ZIP külön táblákat ad, az SVG/PNG pedig determinisztikus aggregált közösségi térképet készít.
+5. A JSON export a konfigurációt, node-okat, kapcsolatokat, tagságokat és mutatókat együtt tartalmazza; a CSV ZIP külön táblákat ad, a futásexport SVG/PNG formátuma determinisztikus aggregált közösségi térképet készít. A gráfok saját „Aktuális nézet” gombjai ezzel szemben pontosan a pillanatnyi interaktív pan/zoomot és node-pozíciókat mentik.
 
 A stabilitási címke alapértelmezett küszöbei: `STABLE ≥ 0,80`, `MIXED ≥ 0,55`, ez alatt `UNSTABLE`. A node-pontszám legfeljebb tíz, az elemzési gráfban megmaradó fő szomszéddal való együttklaszterezés gyakorisága a seed-futások között.
 
 ## Következő mérföldkő
 
-Az 5. fázis fennmaradó validációs és hardening feladatai következnek: a becslési memóriaformula valós Oracle-adathalmazokon történő kalibrálása, golden Oracle séma és szélesebb algoritmusregresszió, Docker Compose tiszta-adatkönyvtár próba, valamint a felhasználói elfogadási forgatókönyv. A funkcionális tervből még hátravan a kísérleti hierarchikus közösségelemzés és az aktuális Cytoscape-nézet pozícióhű képmentése.
+Az 5. fázis fennmaradó validációs és hardening feladatai következnek: a becslési memóriaformula valós Oracle-adathalmazokon történő kalibrálása, golden Oracle séma és szélesebb algoritmusregresszió, Docker Compose tiszta-adatkönyvtár próba, valamint a felhasználói elfogadási forgatókönyv. A funkcionális tervből még hátravan a kísérleti hierarchikus közösségelemzés.
 
 Részletes terv: [oracle-adatbazis-graf-megvalositasi-terv.md](oracle-adatbazis-graf-megvalositasi-terv.md)
