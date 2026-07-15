@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -5,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app
+from app.oracle.scanner import ScanCancelled
 
 
 def test_health_and_public_config_do_not_expose_secrets(tmp_path: Path) -> None:
@@ -65,3 +67,27 @@ def test_scan_endpoint_starts_background_operation(tmp_path: Path) -> None:
 
             assert response.status_code == 202
             assert response.json() == {"accepted": True}
+
+
+def test_scan_timeout_is_reported_as_controlled_failure(tmp_path: Path) -> None:
+    settings = Settings(
+        oracle_user="reader", oracle_password="secret", oracle_dsn="test-db",
+        app_data_dir=tmp_path, scan_max_seconds=1,
+    )
+
+    def slow_scan(_self, _options, _report, cancelled, *_args) -> dict:
+        while not cancelled.wait(0.01):
+            pass
+        raise ScanCancelled()
+
+    with patch("app.oracle.scanner.OracleScanner.run", slow_scan):
+        with TestClient(create_app(settings)) as client:
+            assert client.post("/api/scan", json={"schemas": ["SALES"]}).status_code == 202
+            for _ in range(150):
+                snapshot = client.get("/api/scan/status").json()
+                if snapshot["state"] == "FAILED":
+                    break
+                time.sleep(0.01)
+
+    assert snapshot["state"] == "FAILED"
+    assert snapshot["error_code"] == "SCAN_TIMEOUT"

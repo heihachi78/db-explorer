@@ -2,6 +2,7 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
@@ -131,10 +132,20 @@ def test_hop_and_weighted_path_can_choose_different_routes(tmp_path: Path) -> No
         weighted = client.post("/api/paths", json={
             "sourceId": "C", "targetId": "B", "mode": "WEIGHTED",
         })
+        hidden_external = client.post("/api/paths", json={
+            "sourceId": "B", "targetId": "X", "includeExternal": False,
+        })
+        visible_external = client.post("/api/paths", json={
+            "sourceId": "B", "targetId": "X", "includeExternal": True,
+        })
 
     assert [node["id"] for node in hops.json()["paths"][0]["nodes"]] == ["C", "B"]
     assert [node["id"] for node in weighted.json()["paths"][0]["nodes"]] == ["C", "A", "B"]
     assert weighted.json()["paths"][0]["totalCost"] < 1
+    assert weighted.json()["paths"][0]["edges"][0]["effectiveWeight"] == 3
+    assert weighted.json()["paths"][0]["edges"][0]["stepCost"] == pytest.approx(1 / 3)
+    assert hidden_external.json()["paths"] == []
+    assert [node["id"] for node in visible_external.json()["paths"][0]["nodes"]] == ["B", "X"]
 
 
 def test_graph_api_uses_uniform_not_found_and_validation_errors(tmp_path: Path) -> None:

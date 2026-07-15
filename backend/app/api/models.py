@@ -24,6 +24,7 @@ class ScanRequest(BaseModel):
     includeSourceCode: bool = False
     resolveExternalReferences: bool = True
     includeSchedulerObjects: bool = False
+    synonymMaxDepth: int = Field(default=8, ge=1, le=32)
 
     @field_validator("schemas", "objectTypes")
     @classmethod
@@ -78,6 +79,7 @@ class PathsRequest(BaseModel):
     maxDepth: int = Field(default=12, ge=1, le=30)
     relationshipTypes: list[str] = Field(default_factory=list)
     minimumConfidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    includeExternal: bool = True
     edgeWeights: dict[str, float] = Field(default_factory=dict)
     maxExpandedNodes: int = Field(default=2_000, ge=1, le=10_000)
 

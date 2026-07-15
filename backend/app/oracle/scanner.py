@@ -48,10 +48,51 @@ class ScanOptions:
     include_source_code: bool = False
     resolve_external_references: bool = True
     include_scheduler_objects: bool = False
+    synonym_max_depth: int = 8
 
 
 class ScanCancelled(RuntimeError):
     pass
+
+
+def resolve_synonym_chain(
+    source: tuple[str, str],
+    synonyms: dict[tuple[str, str], tuple[str, str, str | None]],
+    max_depth: int,
+) -> dict[str, Any]:
+    current = source
+    visited = {source}
+    path = [source]
+    for depth in range(1, max_depth + 1):
+        target = synonyms.get(current)
+        if target is None:
+            return {
+                "status": "RESOLVED", "depth": depth - 1,
+                "finalOwner": current[0], "finalName": current[1], "path": path,
+            }
+        target_key = (target[0], target[1])
+        path.append(target_key)
+        if target[2]:
+            return {
+                "status": "REMOTE", "depth": depth,
+                "finalOwner": target[0], "finalName": target[1], "path": path,
+            }
+        if target_key in visited:
+            return {
+                "status": "CYCLE", "depth": depth,
+                "finalOwner": target[0], "finalName": target[1], "path": path,
+            }
+        if target_key not in synonyms:
+            return {
+                "status": "RESOLVED", "depth": depth,
+                "finalOwner": target[0], "finalName": target[1], "path": path,
+            }
+        visited.add(target_key)
+        current = target_key
+    return {
+        "status": "MAX_DEPTH", "depth": max_depth,
+        "finalOwner": current[0], "finalName": current[1], "path": path,
+    }
 
 
 class ObjectResolver:
@@ -657,6 +698,13 @@ class OracleScanner:
             ORDER BY owner, synonym_name
         """
         rows = list(_rows(connection, query, parameters))
+        synonym_targets = {
+            (str(row["owner"]), str(row["synonym_name"])): (
+                str(row["table_owner"]), str(row["table_name"]),
+                str(row["db_link"]) if row["db_link"] else None,
+            )
+            for row in rows
+        }
         for row in rows:
             owner = str(row["owner"])
             name = str(row["synonym_name"])
@@ -664,6 +712,7 @@ class OracleScanner:
                 writer, owner, name, "SYNONYM", external=False,
                 metadata={"public": owner == "PUBLIC"},
             )
+        reported_cycles: set[tuple[tuple[str, str], ...]] = set()
         for index, row in enumerate(rows, start=1):
             if index % 1000 == 0:
                 self._check_cancel(cancelled)
@@ -672,6 +721,26 @@ class OracleScanner:
             source = self.resolver.resolve(owner, name, "SYNONYM")
             target_owner = str(row["table_owner"])
             target_name = str(row["table_name"])
+            resolution = resolve_synonym_chain(
+                (owner, name), synonym_targets, options.synonym_max_depth
+            )
+            resolution_path = [f"{item_owner}.{item_name}" for item_owner, item_name in resolution["path"]]
+            if resolution["status"] == "CYCLE":
+                cycle_key = tuple(sorted(set(resolution["path"][:-1])))
+                if cycle_key not in reported_cycles:
+                    reported_cycles.add(cycle_key)
+                    self.counters["synonymCycles"] += 1
+                    self.warnings.append(
+                        "Synonym cycle detected: " + " -> ".join(resolution_path)
+                    )
+                self.counters["unresolvedSynonyms"] += 1
+            elif resolution["status"] == "MAX_DEPTH":
+                self.counters["synonymDepthExceeded"] += 1
+                self.counters["unresolvedSynonyms"] += 1
+                self.warnings.append(
+                    f"Synonym resolution reached depth {options.synonym_max_depth}: "
+                    + " -> ".join(resolution_path)
+                )
             target = self.resolver.resolve(target_owner, target_name)
             if target is None:
                 target = self._target(
@@ -679,8 +748,17 @@ class OracleScanner:
                     force_external=bool(row["db_link"]),
                     metadata={"databaseLink": row["db_link"]},
                 )
-                self.counters["unresolvedSynonyms"] += 1
-            metadata = {"databaseLink": row["db_link"], "public": owner == "PUBLIC"}
+                if resolution["status"] not in {"CYCLE", "MAX_DEPTH"}:
+                    self.counters["unresolvedSynonyms"] += 1
+            metadata = {
+                "databaseLink": row["db_link"],
+                "public": owner == "PUBLIC",
+                "resolutionStatus": resolution["status"],
+                "resolutionDepth": resolution["depth"],
+                "resolvedOwner": resolution["finalOwner"],
+                "resolvedName": resolution["finalName"],
+                "resolutionPath": resolution_path,
+            }
             self._save_relationship(
                 writer, source, target, "POINTS_TO", metadata,
                 "ALL_SYNONYMS", {key: row[key] for key in row},
@@ -728,6 +806,8 @@ class OracleScanner:
             "relationshipTypeCounts": relationship_type_counts,
             "externalObjectCount": self.counters["externalObjects"],
             "unresolvedSynonymCount": self.counters["unresolvedSynonyms"],
+            "synonymCycleCount": self.counters["synonymCycles"],
+            "synonymDepthExceededCount": self.counters["synonymDepthExceeded"],
             "warnings": self.warnings,
         }
 

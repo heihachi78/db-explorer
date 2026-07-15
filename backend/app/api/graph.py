@@ -135,6 +135,7 @@ def paths(payload: PathsRequest, request: Request) -> dict:
         max_depth=payload.maxDepth,
         relationship_types=tuple(payload.relationshipTypes),
         minimum_confidence=payload.minimumConfidence,
+        include_external=payload.includeExternal,
         edge_weights=DEFAULT_EDGE_WEIGHTS | payload.edgeWeights,
         max_expanded_nodes=payload.maxExpandedNodes,
     )

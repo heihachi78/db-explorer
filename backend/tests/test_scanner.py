@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import threading
 from datetime import datetime
@@ -6,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from app.oracle.connection import OracleCredentials
-from app.oracle.scanner import OracleScanner, ScanCancelled, ScanOptions
+from app.oracle.scanner import (
+    OracleScanner,
+    ScanCancelled,
+    ScanOptions,
+    resolve_synonym_chain,
+)
 from app.persistence.database import initialize_database
 
 
@@ -107,6 +113,87 @@ class FakeConnection:
 
     def close(self) -> None:
         pass
+
+
+class SynonymChainCursor(FakeCursor):
+    def execute(self, query: str, parameters=None) -> None:
+        normalized = " ".join(query.lower().split())
+        if "from all_synonyms" not in normalized:
+            return super().execute(query, parameters)
+        rows = [
+            {"owner": "SALES", "synonym_name": "ALIAS_A", "table_owner": "SALES", "table_name": "ALIAS_B", "db_link": None},
+            {"owner": "SALES", "synonym_name": "ALIAS_B", "table_owner": "SALES", "table_name": "ORDERS", "db_link": None},
+            {"owner": "SALES", "synonym_name": "CYCLE_A", "table_owner": "SALES", "table_name": "CYCLE_B", "db_link": None},
+            {"owner": "SALES", "synonym_name": "CYCLE_B", "table_owner": "SALES", "table_name": "CYCLE_A", "db_link": None},
+        ]
+        columns = list(rows[0])
+        self.description = [(column,) for column in columns]
+        self._rows = [tuple(row[column] for column in columns) for row in rows]
+
+
+class SynonymChainConnection(FakeConnection):
+    def cursor(self) -> SynonymChainCursor:
+        return SynonymChainCursor()
+
+
+def test_synonym_chain_resolution_reports_terminal_states() -> None:
+    synonyms = {
+        ("SALES", "A"): ("SALES", "B", None),
+        ("SALES", "B"): ("SALES", "ORDERS", None),
+        ("SALES", "REMOTE"): ("REMOTE", "ORDERS", "ERP_LINK"),
+        ("SALES", "CYCLE_A"): ("SALES", "CYCLE_B", None),
+        ("SALES", "CYCLE_B"): ("SALES", "CYCLE_A", None),
+    }
+
+    resolved = resolve_synonym_chain(("SALES", "A"), synonyms, 8)
+    remote = resolve_synonym_chain(("SALES", "REMOTE"), synonyms, 8)
+    cycle = resolve_synonym_chain(("SALES", "CYCLE_A"), synonyms, 8)
+    limited = resolve_synonym_chain(("SALES", "A"), synonyms, 1)
+
+    assert resolved == {
+        "status": "RESOLVED", "depth": 2,
+        "finalOwner": "SALES", "finalName": "ORDERS",
+        "path": [("SALES", "A"), ("SALES", "B"), ("SALES", "ORDERS")],
+    }
+    assert remote["status"] == "REMOTE"
+    assert remote["depth"] == 1
+    assert cycle["status"] == "CYCLE"
+    assert cycle["depth"] == 2
+    assert limited["status"] == "MAX_DEPTH"
+    assert limited["finalName"] == "B"
+
+
+def test_scanner_persists_synonym_chain_resolution_and_cycle_warning(tmp_path: Path) -> None:
+    current = tmp_path / "oracle_graph.db"
+    scanner = OracleScanner(
+        OracleCredentials("reader", "secret", "test", "thin"),
+        tmp_path / "oracle_graph.next.db",
+        current,
+        connection_factory=lambda _credentials: SynonymChainConnection(),
+    )
+
+    scanner.run(ScanOptions(("SALES",)), lambda *_args, **_kwargs: None, threading.Event())
+
+    with sqlite3.connect(current) as connection:
+        metadata = json.loads(connection.execute(
+            """
+            SELECT relationships.metadata_json
+            FROM relationships JOIN objects ON objects.id = relationships.source_id
+            WHERE objects.name = 'ALIAS_A' AND relationships.relationship_type = 'POINTS_TO'
+            """
+        ).fetchone()[0])
+        summary = json.loads(connection.execute(
+            "SELECT value_json FROM app_meta WHERE key = 'scan_summary'"
+        ).fetchone()[0])
+
+    assert metadata["resolutionStatus"] == "RESOLVED"
+    assert metadata["resolutionDepth"] == 2
+    assert metadata["resolvedOwner"] == "SALES"
+    assert metadata["resolvedName"] == "ORDERS"
+    assert metadata["resolutionPath"] == ["SALES.ALIAS_A", "SALES.ALIAS_B", "SALES.ORDERS"]
+    assert summary["synonymCycleCount"] == 1
+    assert summary["unresolvedSynonymCount"] == 2
+    assert len([warning for warning in summary["warnings"] if "cycle" in warning.lower()]) == 1
 
 
 def test_scanner_builds_and_publishes_source_graph(tmp_path: Path) -> None:

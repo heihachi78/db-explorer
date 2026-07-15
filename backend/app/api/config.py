@@ -22,5 +22,8 @@ def get_public_config(request: Request) -> PublicConfig:
             "hardMaxNodes": 2_000,
             "defaultMaxEdges": 2_000,
             "hardMaxEdges": 10_000,
+            "scanMaxSeconds": settings.scan_max_seconds,
+            "analysisMaxNodes": settings.analysis_max_nodes,
+            "analysisMaxEdges": settings.analysis_max_edges,
         },
     )

@@ -130,9 +130,12 @@ test("does not present a completed export as a successful scan", async () => {
 });
 
 test("searches graph objects without loading the full graph", async () => {
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
-    const body = url.includes("/objects?") ? {
+    const body = url.endsWith("/subgraph") ? {
+      rootObjectIds: ["db::pdb::SALES::TABLE::ORDERS"], nodes: [], edges: [],
+      truncated: false, suggestion: null,
+    } : url.includes("/objects?") ? {
       items: [{
         id: "db::pdb::SALES::TABLE::ORDERS",
         owner: "SALES",
@@ -174,6 +177,22 @@ test("searches graph objects without loading the full graph", async () => {
     expect.stringContaining("/api/objects?q=ORDER*&pageSize=30"),
     expect.any(Object),
   );
+
+  fireEvent.change(screen.getByLabelText("Kapcsolattípusok"), { target: { value: "depends_on, foreign_key" } });
+  fireEvent.change(screen.getByLabelText("Minimum confidence"), { target: { value: "0.8" } });
+  fireEvent.click(screen.getByLabelText("Külső objektumok"));
+  fireEvent.click(screen.getByRole("button", { name: "Gráf" }));
+  await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith(
+    "/api/subgraph",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        rootObjectIds: ["db::pdb::SALES::TABLE::ORDERS"], depth: 1, direction: "BOTH",
+        relationshipTypes: ["DEPENDS_ON", "FOREIGN_KEY"], minimumConfidence: 0.8,
+        includeExternal: false,
+      }),
+    }),
+  ));
 });
 
 test("shows persisted analysis metrics and starts a resolution profile", async () => {
@@ -232,6 +251,13 @@ test("shows persisted analysis metrics and starts a resolution profile", async (
       }], edges: [] };
     } else if (url.endsWith("/analyses/resolution-profile") && method === "POST") {
       body = { accepted: true, analysisIds: ["profile-1", "profile-2"] };
+    } else if (url.endsWith("/analyses/estimate") && method === "POST") {
+      body = {
+        estimatedNodeCount: 6, estimatedRelationshipCount: 7,
+        sourceNodeCount: 6, sourceRelationshipCount: 7,
+        estimatedMemoryBytes: 5760, sizeCategory: "SMALL", withinLimits: true,
+        limits: { maxNodes: 500000, maxEdges: 5000000 }, warnings: [], approximate: true,
+      };
     } else if (url.endsWith("/analyses/compare") && method === "POST") {
       body = {
         items: [
@@ -312,6 +338,7 @@ test("shows persisted analysis metrics and starts a resolution profile", async (
   });
 
   render(<App />);
+  expect(await screen.findByText("6 node · 7 kapcsolat")).toBeInTheDocument();
   fireEvent.click(await screen.findByText("Domain analysis"));
   expect(await screen.findByText("SALES / ORDER")).toBeInTheDocument();
   expect(screen.getByText("90.0%")).toBeInTheDocument();

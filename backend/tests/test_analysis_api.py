@@ -1,4 +1,5 @@
 import sqlite3
+import threading
 import time
 import json
 import zipfile
@@ -6,6 +7,7 @@ from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
@@ -13,7 +15,9 @@ from app.main import create_app
 from app.analysis.models import AnalysisConfig, AnalysisResult
 from app.persistence.analysis_repository import AnalysisRepository
 from app.persistence.database import initialize_database
-from app.analysis.service import AnalysisCancelled
+from app.analysis.service import AnalysisCancelled, AnalysisService
+from app.errors import AppError
+from app.persistence.graph_repository import GraphRepository
 
 
 def _seed_two_communities(path: Path) -> None:
@@ -98,6 +102,45 @@ def test_analysis_api_runs_persists_and_exposes_communities(tmp_path: Path) -> N
     assert len(community_graph.json()["edges"]) == 1
     assert len(detail.json()["nodes"]) == 3
     assert "PAGERANK" in detail.json()["nodes"][0]["centrality"]
+
+
+def test_analysis_estimate_and_preflight_limit_rejection(tmp_path: Path) -> None:
+    settings = Settings(app_data_dir=tmp_path, analysis_max_nodes=5, analysis_max_edges=100)
+    _seed_two_communities(settings.database_path)
+
+    with TestClient(create_app(settings)) as client:
+        estimate = client.post("/api/analyses/estimate", json={
+            "minimumConfidence": 0, "hubPolicy": "NONE",
+        })
+        rejected = client.post("/api/analyses", json={
+            "minimumConfidence": 0, "hubPolicy": "NONE",
+        })
+        runs = client.get("/api/analyses").json()["items"]
+
+    assert estimate.status_code == 200
+    assert estimate.json()["estimatedNodeCount"] == 6
+    assert estimate.json()["estimatedRelationshipCount"] == 7
+    assert estimate.json()["sizeCategory"] == "SMALL"
+    assert estimate.json()["estimatedMemoryBytes"] > 0
+    assert estimate.json()["withinLimits"] is False
+    assert rejected.status_code == 413
+    assert rejected.json()["code"] == "ANALYSIS_TOO_LARGE"
+    assert runs == []
+
+
+def test_analysis_service_translates_memory_exhaustion(tmp_path: Path) -> None:
+    settings = Settings(app_data_dir=tmp_path)
+    _seed_two_communities(settings.database_path)
+    repository = AnalysisRepository(settings.database_path)
+    repository.create("memory", AnalysisConfig(name="Memory"))
+    service = AnalysisService(GraphRepository(settings.database_path), repository)
+
+    with patch("app.analysis.service.build_analysis_graph", side_effect=MemoryError):
+        with pytest.raises(AppError) as raised:
+            service.run("memory", AnalysisConfig(name="Memory"), lambda *_args, **_kwargs: None, threading.Event())
+
+    assert raised.value.code == "ANALYSIS_MEMORY_EXHAUSTED"
+    assert raised.value.status_code == 507
 
 
 def test_analysis_comparison_validation_and_delete(tmp_path: Path) -> None:

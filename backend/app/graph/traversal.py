@@ -183,10 +183,12 @@ def find_paths(
     max_depth: int,
     relationship_types: tuple[str, ...],
     minimum_confidence: float,
+    include_external: bool,
     edge_weights: dict[str, float],
     max_expanded_nodes: int,
 ) -> dict:
-    _require_objects(repository, [source_id, target_id])
+    required_nodes = _require_objects(repository, [source_id, target_id])
+    node_cache = {node.id: node for node in required_nodes}
     if source_id == target_id:
         node = repository.get_object(source_id)
         return {
@@ -217,15 +219,30 @@ def find_paths(
             truncated = True
             break
         expanded += 1
+        current_node = node_cache.get(current_id)
+        if current_node is not None and current_node.is_external:
+            continue
         edges = repository.adjacent_edges(
             [current_id],
             direction=direction,
             relationship_types=relationship_types,
             minimum_confidence=minimum_confidence,
         )
+        neighbors = {
+            neighbor_id
+            for edge in edges
+            if (neighbor_id := _neighbor(edge, current_id, direction)) is not None
+        }
+        node_cache.update({
+            node.id: node
+            for node in repository.get_objects(neighbors - node_cache.keys())
+        })
         for edge in edges:
             neighbor_id = _neighbor(edge, current_id, direction)
             if neighbor_id is None or neighbor_id in node_path:
+                continue
+            neighbor = node_cache.get(neighbor_id)
+            if neighbor is None or (neighbor.is_external and not include_external):
                 continue
             step_cost = 1.0 if mode == "HOPS" else 1.0 / _effective_weight(edge, edge_weights)
             heapq.heappush(
@@ -245,7 +262,16 @@ def find_paths(
         nodes = repository.get_objects(node_ids)
         paths.append({
             "nodes": [node.to_api() for node in nodes],
-            "edges": [edge.to_api() for edge in edges],
+            "edges": [
+                edge.to_api() | {
+                    "effectiveWeight": round(_effective_weight(edge, edge_weights), 12),
+                    "stepCost": round(
+                        1.0 if mode == "HOPS" else 1.0 / _effective_weight(edge, edge_weights),
+                        12,
+                    ),
+                }
+                for edge in edges
+            ],
             "hops": len(edges),
             "totalCost": round(cost, 12),
         })

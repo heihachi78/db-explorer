@@ -18,6 +18,7 @@ export function GraphExplorer() {
   const [query, setQuery] = useState("");
   const [owner, setOwner] = useState("");
   const [objectType, setObjectType] = useState("");
+  const [status, setStatus] = useState("");
   const [search, setSearch] = useState<ObjectSearchResult | null>(null);
   const [graph, setGraph] = useState<SubgraphResult>(EMPTY_GRAPH);
   const [root, setRoot] = useState<GraphNode | null>(null);
@@ -25,6 +26,9 @@ export function GraphExplorer() {
   const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null);
   const [depth, setDepth] = useState(1);
   const [direction, setDirection] = useState<"INCOMING" | "OUTGOING" | "BOTH">("BOTH");
+  const [relationshipTypes, setRelationshipTypes] = useState("");
+  const [minimumConfidence, setMinimumConfidence] = useState(0);
+  const [includeExternal, setIncludeExternal] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [analysisNote, setAnalysisNote] = useState<string | null>(null);
@@ -53,16 +57,24 @@ export function GraphExplorer() {
   function submitSearch(event: FormEvent) {
     event.preventDefault();
     void run(
-      () => api.searchObjects({ q: query, owner, objectType, pageSize: 30 }),
+      () => api.searchObjects({ q: query, owner, objectType, status, pageSize: 30 }),
       setSearch,
     );
+  }
+
+  function graphFilters() {
+    return {
+      relationshipTypes: relationshipTypes.split(",").map((item) => item.trim().toUpperCase()).filter(Boolean),
+      minimumConfidence,
+      includeExternal,
+    };
   }
 
   function showSubgraph(node: GraphNode) {
     setRoot(node);
     setAnalysisNote(null);
     void run(
-      () => api.subgraph({ rootObjectIds: [node.id], depth, direction }),
+      () => api.subgraph({ rootObjectIds: [node.id], depth, direction, ...graphFilters() }),
       (result) => {
         setGraph(result);
         setSelectedNode(node);
@@ -79,7 +91,7 @@ export function GraphExplorer() {
     const node = selectedNode ?? root;
     if (!node) return;
     void run(
-      () => api.impact({ objectId: node.id, mode, maxDepth: 5 }),
+      () => api.impact({ objectId: node.id, mode, maxDepth: 5, ...graphFilters() }),
       (result) => {
         setGraph(result);
         setRoot(node);
@@ -93,7 +105,10 @@ export function GraphExplorer() {
   function showPath(target: GraphNode, mode: "HOPS" | "WEIGHTED") {
     if (!root || root.id === target.id) return;
     void run(
-      () => api.paths({ sourceId: root.id, targetId: target.id, mode, directed: false, maxPaths: 1 }),
+      () => api.paths({
+        sourceId: root.id, targetId: target.id, mode, directed: false, maxPaths: 1,
+        ...graphFilters(),
+      }),
       (result) => {
         const path = result.paths[0];
         if (!path) {
@@ -129,6 +144,10 @@ export function GraphExplorer() {
         <label>
           <span>Típus</span>
           <input value={objectType} onChange={(event) => setObjectType(event.target.value)} placeholder="TABLE" />
+        </label>
+        <label>
+          <span>Állapot</span>
+          <input value={status} onChange={(event) => setStatus(event.target.value)} placeholder="VALID" />
         </label>
         <button className="primary-button" disabled={busy}>Keresés</button>
       </form>
@@ -170,6 +189,13 @@ export function GraphExplorer() {
                 <option value="BOTH">Mindkettő</option><option value="OUTGOING">Kimenő</option><option value="INCOMING">Bejövő</option>
               </select>
             </label>
+            <label>Kapcsolattípusok
+              <input aria-label="Kapcsolattípusok" value={relationshipTypes} onChange={(event) => setRelationshipTypes(event.target.value)} placeholder="DEPENDS_ON, FOREIGN_KEY" />
+            </label>
+            <label>Min. confidence
+              <input aria-label="Minimum confidence" type="number" min="0" max="1" step="0.05" value={minimumConfidence} onChange={(event) => setMinimumConfidence(Number(event.target.value))} />
+            </label>
+            <label className="graph-filter-check"><input type="checkbox" checked={includeExternal} onChange={(event) => setIncludeExternal(event.target.checked)} />Külső objektumok</label>
             <button type="button" onClick={refreshSubgraph} disabled={!root || busy}>Újratöltés</button>
             <button type="button" onClick={() => showImpact("DEPENDENTS")} disabled={!root || busy}>Hatás</button>
             <button type="button" onClick={() => showImpact("DEPENDENCIES")} disabled={!root || busy}>Függőségek</button>
@@ -205,6 +231,8 @@ export function GraphExplorer() {
               <h4>{selectedEdge.relationshipType}</h4>
               <dl>
                 <div><dt>Confidence</dt><dd>{selectedEdge.confidence.toFixed(2)}</dd></div>
+                {selectedEdge.effectiveWeight !== undefined && <div><dt>Effektív súly</dt><dd>{selectedEdge.effectiveWeight.toFixed(3)}</dd></div>}
+                {selectedEdge.stepCost !== undefined && <div><dt>Lépésköltség</dt><dd>{selectedEdge.stepCost.toFixed(3)}</dd></div>}
                 <div><dt>Forrás</dt><dd>{selectedEdge.origin}</dd></div>
               </dl>
               <h5>Evidence</h5>

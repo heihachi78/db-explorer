@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     app_data_dir: Path = Path("data")
     app_log_level: str = "INFO"
     app_cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173"]
+    scan_max_seconds: int = Field(default=3_600, ge=1, le=86_400)
+    analysis_max_nodes: int = Field(default=500_000, ge=1, le=5_000_000)
+    analysis_max_edges: int = Field(default=5_000_000, ge=1, le=50_000_000)
 
     @field_validator("app_cors_origins", mode="before")
     @classmethod

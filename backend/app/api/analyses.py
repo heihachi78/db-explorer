@@ -6,7 +6,12 @@ from dataclasses import replace
 import igraph
 from fastapi import APIRouter, Request, status
 
-from app.analysis.models import AnalysisConfig, DEFAULT_EDGE_WEIGHTS, DEFAULT_OBJECT_TYPES
+from app.analysis.models import (
+    TECHNICAL_OBJECT_TYPES,
+    AnalysisConfig,
+    DEFAULT_EDGE_WEIGHTS,
+    DEFAULT_OBJECT_TYPES,
+)
 from app.analysis.comparison import compare_memberships
 from app.analysis.service import AnalysisCancelled, AnalysisService
 from app.analysis.preprocessing import build_analysis_graph
@@ -63,6 +68,20 @@ def _config(payload: AnalysisRequest) -> AnalysisConfig:
     )
 
 
+def _estimate(config: AnalysisConfig, request: Request) -> dict:
+    settings = request.app.state.settings
+    object_types = set(config.object_types)
+    if config.include_technical_objects:
+        object_types.update(TECHNICAL_OBJECT_TYPES)
+    return GraphRepository(settings.database_path).estimate_analysis(
+        object_types=tuple(sorted(object_types)),
+        owners=config.owners,
+        minimum_confidence=config.minimum_confidence,
+        max_nodes=settings.analysis_max_nodes,
+        max_edges=settings.analysis_max_edges,
+    )
+
+
 async def _start_configs(
     configs: list[AnalysisConfig],
     request: Request,
@@ -76,6 +95,16 @@ async def _start_configs(
             "Another long-running operation is already in progress.",
             status_code=409,
         )
+    estimate = _estimate(configs[0], request)
+    if not estimate["withinLimits"]:
+        raise AppError(
+            "ANALYSIS_TOO_LARGE",
+            "A becsült elemzési gráf meghaladja a konfigurált erőforráskorlátot.",
+            status_code=413,
+            details=estimate | {
+                "suggestion": "Szűkítsd az ownereket vagy objektumtípusokat, illetve emeld a minimum confidence értéket."
+            },
+        )
     repository = _repository(request)
     analysis_ids = [str(uuid.uuid4()) for _ in configs]
     for analysis_id, config in zip(analysis_ids, configs, strict=True):
@@ -87,6 +116,8 @@ async def _start_configs(
         service = AnalysisService(
             GraphRepository(request.app.state.settings.database_path),
             repository,
+            max_nodes=request.app.state.settings.analysis_max_nodes,
+            max_edges=request.app.state.settings.analysis_max_edges,
         )
 
         def run_all() -> None:
@@ -146,6 +177,11 @@ async def start_analysis(payload: AnalysisRequest, request: Request) -> dict:
     analysis_ids = await _start_configs([_config(payload)], request)
     analysis_id = analysis_ids[0]
     return {"accepted": True, "analysisId": analysis_id}
+
+
+@router.post("/estimate")
+def estimate_analysis(payload: AnalysisRequest, request: Request) -> dict:
+    return _estimate(_config(payload), request)
 
 
 @router.post("/resolution-profile", status_code=status.HTTP_202_ACCEPTED)

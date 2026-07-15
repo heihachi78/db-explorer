@@ -64,6 +64,7 @@ cd frontend && npm test -- --run && npm run build
 - egyetlen párhuzamos hosszú műveletet engedő, megszakítható task manager;
 - többsémás `ALL_OBJECTS` objektumkinyerés, stabil owner- és container-érzékeny azonosítókkal;
 - `ALL_DEPENDENCIES`, összetett FK, trigger, index, helyi és releváns `PUBLIC` synonym kapcsolatok;
+- konfigurálható mélységű synonym-láncfeloldás, feloldási útvonallal, ciklus- és mélységlimit-figyelmeztetéssel;
 - külső és távoli célok placeholder node-jai, determinisztikus élek és külön evidence-rekordok;
 - scan lefedettségi összesítő owner-, objektumtípus- és kapcsolattípus-számlálókkal;
 - megszakításbiztos staging pipeline, idegenkulcs- és endpoint-validálás, majd atomikus publikálás;
@@ -71,7 +72,8 @@ cd frontend && npm test -- --run && npm run build
 - facettált objektumkereső, objektum- és kapcsolatrészlet API evidence adatokkal;
 - irány-, kapcsolattípus- és confidence-szűrt, szerveroldalon limitált részgráf API;
 - ciklusbiztos dependents/dependencies hatáselemzés és hopszám- vagy súlyalapú útvonalkeresés;
-- Cytoscape gráfböngésző node/edge detail panellel, impact- és útvonalindítással;
+- Cytoscape gráfböngésző node/edge detail panellel, impact- és útvonalindítással, státusz-, kapcsolattípus-, confidence- és külsőobjektum-szűréssel;
+- objektumtípusonként eltérő node-alakok, jobb kattintásos pozíciórögzítés és újrafuttatható gráfelrendezés;
 - külön raw és analysis gráfréteg, owner-/objektumtípus-/confidence-szűréssel és package spec/body elemzési összevonással;
 - konfigurálható kapcsolattípus-súlyozás, párhuzamosél-aggregáció, súlycap, technikai node policy és háromféle hubkezelés;
 - irányított metrikagráf és szimmetrizált közösséggráf, izolált és megosztott infrastruktúra státusszal;
@@ -79,6 +81,7 @@ cd frontend && npm test -- --run && npm run build
 - közösségi density, conductance, coverage, belső/külső súly, séma- és objektumtípus-eloszlás, valamint schema-határ összesítések;
 - PageRank, weighted strength, in/out degree, betweenness, articulation point, bridge edge és k-core mutatók;
 - atomikusan mentett, megszakítható és újra lekérdezhető elemzési futások, közösségi drill-down és aggregált community graph API;
+- konfigurálható scan-időkorlát, elemzési node/edge hard limit, kontrollált memóriahiba és futás előtti közelítő méret-/memóriabecslés;
 - böngészős Leiden-indítás, resolution profil, futáslista, megszakítás/törlés és közösségi eredménytábla;
 - ötfutásos seed-stabilitásprofil Adjusted Rand Index, NMI, Variation of Information, node-szintű együttklaszterezési stabilitás és dokumentált közösségcímkék számításával;
 - automatikus közösségnév-javaslat domináns séma, névtokenek és központi TABLE/PACKAGE alapján, magyarázattal és helyi elemzői annotációval;
@@ -99,6 +102,6 @@ A stabilitási címke alapértelmezett küszöbei: `STABLE ≥ 0,80`, `MIXED ≥
 
 ## Következő mérföldkő
 
-Az 5. fázis fennmaradó validációs és hardening feladatai következnek: mért node/edge erőforráskorlátok és előzetes méretbecslés, golden Oracle séma és szélesebb algoritmusregresszió, Docker Compose tiszta-adatkönyvtár próba, valamint a felhasználói elfogadási forgatókönyv. A funkcionális tervből még hátravan a kísérleti hierarchikus közösségelemzés, a korlátozott mélységű synonym-láncfeloldás, az aktuális Cytoscape-nézet pozícióhű képmentése és a gráfböngésző további interaktív kapcsolat-/confidence-szűrése.
+Az 5. fázis fennmaradó validációs és hardening feladatai következnek: a becslési memóriaformula valós Oracle-adathalmazokon történő kalibrálása, golden Oracle séma és szélesebb algoritmusregresszió, Docker Compose tiszta-adatkönyvtár próba, valamint a felhasználói elfogadási forgatókönyv. A funkcionális tervből még hátravan a kísérleti hierarchikus közösségelemzés és az aktuális Cytoscape-nézet pozícióhű képmentése.
 
 Részletes terv: [oracle-adatbazis-graf-megvalositasi-terv.md](oracle-adatbazis-graf-megvalositasi-terv.md)

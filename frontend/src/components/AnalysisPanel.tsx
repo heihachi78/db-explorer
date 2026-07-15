@@ -4,6 +4,7 @@ import {
   ApiError,
   api,
   type AnalysisComparison,
+  type AnalysisEstimate,
   type AnalysisRun,
   type CommunityDetail,
   type CommunityGraph,
@@ -17,6 +18,12 @@ const ACTIVE_ANALYSIS_STATES = new Set(["QUEUED", "RUNNING"]);
 
 function percent(value: number | undefined) {
   return value === undefined ? "—" : `${(value * 100).toFixed(1)}%`;
+}
+
+function formatBytes(value: number) {
+  if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KiB`;
+  if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MiB`;
+  return `${(value / 1024 ** 3).toFixed(2)} GiB`;
 }
 
 function ComparisonChart({ comparison }: { comparison: AnalysisComparison }) {
@@ -63,6 +70,8 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
   const [minimumConfidence, setMinimumConfidence] = useState(0.8);
   const [hubPolicy, setHubPolicy] = useState<"NONE" | "DEGREE_NORMALIZATION" | "EXCLUDE_TOP_HUBS">("DEGREE_NORMALIZATION");
   const [includeTechnicalObjects, setIncludeTechnicalObjects] = useState(false);
+  const [estimate, setEstimate] = useState<AnalysisEstimate | null>(null);
+  const [estimatePending, setEstimatePending] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -89,6 +98,21 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
   function analysisPayload() {
     return { name, objective, resolution, seed, minimumConfidence, hubPolicy, includeTechnicalObjects };
   }
+
+  useEffect(() => {
+    let disposed = false;
+    setEstimatePending(true);
+    const timer = setTimeout(() => {
+      void api.estimateAnalysis(analysisPayload()).then((result) => {
+        if (!disposed && typeof result.withinLimits === "boolean") setEstimate(result);
+      }).catch(() => {
+        if (!disposed) setEstimate(null);
+      }).finally(() => {
+        if (!disposed) setEstimatePending(false);
+      });
+    }, 400);
+    return () => { disposed = true; clearTimeout(timer); };
+  }, [name, objective, resolution, seed, minimumConfidence, hubPolicy, includeTechnicalObjects]);
 
   async function start(event: FormEvent) {
     event.preventDefault();
@@ -236,10 +260,19 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
           <label>Hub policy<select value={hubPolicy} onChange={(event) => setHubPolicy(event.target.value as typeof hubPolicy)}><option value="DEGREE_NORMALIZATION">Fokszám-normalizálás</option><option value="NONE">Nincs korrekció</option><option value="EXCLUDE_TOP_HUBS">Top 1% kizárása</option></select></label>
           <label className="checkbox-label"><input type="checkbox" checked={includeTechnicalObjects} onChange={(event) => setIncludeTechnicalObjects(event.target.checked)} />Technikai objektumok bevonása</label>
           {includeTechnicalObjects && <p className="analysis-warning">Az indexek és synonymok torzíthatják a közösséghatárokat.</p>}
+          <div className={`analysis-estimate ${estimate && !estimate.withinLimits ? "blocked" : ""}`} aria-live="polite">
+            <strong>{estimatePending ? "Méretbecslés…" : "Futtatás előtti becslés"}</strong>
+            {estimate && <>
+              <span>{estimate.estimatedNodeCount.toLocaleString("hu-HU")} node · {estimate.estimatedRelationshipCount.toLocaleString("hu-HU")} kapcsolat</span>
+              <span>{formatBytes(estimate.estimatedMemoryBytes)} · {estimate.sizeCategory}</span>
+              {estimate.approximate && <small>Közelítő becslés a jelenlegi szűrőkkel.</small>}
+              {estimate.warnings.map((warning) => <small key={warning}>{warning}</small>)}
+            </>}
+          </div>
           <p className="parameter-hint">Az alapsúlyokat confidence és a választott hub policy korrigálja. Az alapértelmezett profil a logikai objektumokra optimalizált.</p>
-          <button className="primary-button" disabled={busy || anyActive || operationActive}>Elemzés indítása</button>
-          <button className="secondary-button analysis-profile-button" type="button" onClick={() => void startProfile("resolution")} disabled={busy || anyActive || operationActive}>6 pontos resolution profil</button>
-          <button className="secondary-button analysis-profile-button" type="button" onClick={() => void startProfile("seed")} disabled={busy || anyActive || operationActive}>5 seed stabilitásprofil</button>
+          <button className="primary-button" disabled={busy || anyActive || operationActive || estimatePending || estimate?.withinLimits === false}>Elemzés indítása</button>
+          <button className="secondary-button analysis-profile-button" type="button" onClick={() => void startProfile("resolution")} disabled={busy || anyActive || operationActive || estimatePending || estimate?.withinLimits === false}>6 pontos resolution profil</button>
+          <button className="secondary-button analysis-profile-button" type="button" onClick={() => void startProfile("seed")} disabled={busy || anyActive || operationActive || estimatePending || estimate?.withinLimits === false}>5 seed stabilitásprofil</button>
         </form>
 
         <div className="analysis-runs">

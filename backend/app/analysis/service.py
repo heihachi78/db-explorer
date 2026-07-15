@@ -22,9 +22,14 @@ class AnalysisService:
         self,
         graph_repository: GraphRepository,
         analysis_repository: AnalysisRepository,
+        *,
+        max_nodes: int = 500_000,
+        max_edges: int = 5_000_000,
     ) -> None:
         self.graph_repository = graph_repository
         self.analysis_repository = analysis_repository
+        self.max_nodes = max_nodes
+        self.max_edges = max_edges
 
     @staticmethod
     def _check_cancelled(cancelled: threading.Event) -> None:
@@ -32,6 +37,22 @@ class AnalysisService:
             raise AnalysisCancelled("Analysis was cancelled.")
 
     def run(
+        self,
+        analysis_id: str,
+        config: AnalysisConfig,
+        report: Callable[..., None],
+        cancelled: threading.Event,
+    ) -> None:
+        try:
+            self._run(analysis_id, config, report, cancelled)
+        except MemoryError as error:
+            raise AppError(
+                "ANALYSIS_MEMORY_EXHAUSTED",
+                "Az elemzéshez nem áll rendelkezésre elegendő memória; szűkítsd az ownereket vagy objektumtípusokat.",
+                status_code=507,
+            ) from error
+
+    def _run(
         self,
         analysis_id: str,
         config: AnalysisConfig,
@@ -50,6 +71,19 @@ class AnalysisService:
                 "ANALYSIS_EMPTY_GRAPH",
                 "No objects remain after applying the analysis filters.",
                 status_code=422,
+            )
+        if len(graph.nodes) > self.max_nodes or len(graph.directed_edges) > self.max_edges:
+            raise AppError(
+                "ANALYSIS_TOO_LARGE",
+                "Az elemzési gráf meghaladja a konfigurált erőforráskorlátot.",
+                status_code=413,
+                details={
+                    "nodeCount": len(graph.nodes),
+                    "edgeCount": len(graph.directed_edges),
+                    "maxNodes": self.max_nodes,
+                    "maxEdges": self.max_edges,
+                    "suggestion": "Szűkítsd az ownereket vagy objektumtípusokat, illetve emeld a minimum confidence értéket.",
+                },
             )
         report(
             TaskState.DETECTING_COMMUNITIES,

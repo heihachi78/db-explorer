@@ -131,6 +131,74 @@ class GraphRepository:
             [GraphEdge.from_row(row) for row in edge_rows],
         )
 
+    def estimate_analysis(
+        self,
+        *,
+        object_types: tuple[str, ...],
+        owners: tuple[str, ...],
+        minimum_confidence: float,
+        max_nodes: int,
+        max_edges: int,
+    ) -> dict[str, Any]:
+        clauses = ["is_external = 0", "object_type NOT IN ('PACKAGE_BODY', 'TYPE_BODY')"]
+        parameters: list[Any] = []
+        if object_types:
+            clauses.append(f"object_type IN ({_placeholders(object_types)})")
+            parameters.extend(object_types)
+        if owners:
+            clauses.append(f"owner IN ({_placeholders(owners)})")
+            parameters.extend(owners)
+        with database(self.path, read_only=True) as connection:
+            row = connection.execute(
+                f"""
+                WITH eligible AS (
+                    SELECT id FROM objects WHERE {' AND '.join(clauses)}
+                )
+                SELECT
+                    (SELECT COUNT(*) FROM eligible) AS node_count,
+                    (
+                        SELECT COUNT(*) FROM relationships relationship
+                        JOIN eligible source ON source.id = relationship.source_id
+                        JOIN eligible target ON target.id = relationship.target_id
+                        WHERE relationship.confidence >= ?
+                    ) AS relationship_count,
+                    (SELECT COUNT(*) FROM objects) AS source_node_count,
+                    (SELECT COUNT(*) FROM relationships) AS source_relationship_count
+                """,
+                (*parameters, minimum_confidence),
+            ).fetchone()
+        node_count = int(row["node_count"])
+        relationship_count = int(row["relationship_count"])
+        if node_count < 10_000 and relationship_count < 100_000:
+            category = "SMALL"
+        elif node_count <= 100_000 and relationship_count <= 1_000_000:
+            category = "MEDIUM"
+        elif node_count <= 500_000 and relationship_count <= 5_000_000:
+            category = "LARGE"
+        else:
+            category = "OVERSIZED"
+        estimated_memory = node_count * 512 + relationship_count * 384
+        within_limits = node_count <= max_nodes and relationship_count <= max_edges
+        warnings = []
+        if category == "LARGE":
+            warnings.append("A nagy gráf komponensenként fut, a betweenness mintavételes lehet.")
+        elif category == "OVERSIZED":
+            warnings.append("A becsült méret külön benchmarkot vagy szigorúbb szűrést igényel.")
+        if not within_limits:
+            warnings.append("A becsült gráf meghaladja a konfigurált elemzési korlátot.")
+        return {
+            "estimatedNodeCount": node_count,
+            "estimatedRelationshipCount": relationship_count,
+            "sourceNodeCount": int(row["source_node_count"]),
+            "sourceRelationshipCount": int(row["source_relationship_count"]),
+            "estimatedMemoryBytes": estimated_memory,
+            "sizeCategory": category,
+            "withinLimits": within_limits,
+            "limits": {"maxNodes": max_nodes, "maxEdges": max_edges},
+            "warnings": warnings,
+            "approximate": True,
+        }
+
     def get_objects(self, object_ids: Iterable[str]) -> list[GraphNode]:
         ids = tuple(dict.fromkeys(object_ids))
         if not ids:

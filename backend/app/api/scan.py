@@ -4,6 +4,7 @@ import threading
 from fastapi import APIRouter, Request, status
 
 from app.api.models import ScanRequest
+from app.errors import AppError
 from app.oracle.connection import credentials_from_settings
 from app.oracle.scanner import OracleScanner, ScanCancelled, ScanOptions, load_scan_summary
 from app.persistence.export_repository import ExportRepository
@@ -40,6 +41,7 @@ async def start_scan(payload: ScanRequest, request: Request) -> dict[str, bool]:
         include_source_code=payload.includeSourceCode,
         resolve_external_references=payload.resolveExternalReferences,
         include_scheduler_objects=payload.includeSchedulerObjects,
+        synonym_max_depth=payload.synonymMaxDepth,
     )
 
     async def operation(manager) -> None:
@@ -62,8 +64,25 @@ async def start_scan(payload: ScanRequest, request: Request) -> dict[str, bool]:
             )
         )
         try:
-            await asyncio.shield(worker)
+            await asyncio.wait_for(
+                asyncio.shield(worker), timeout=settings.scan_max_seconds
+            )
             ExportRepository(settings.database_path).cleanup_files(settings.export_dir)
+        except TimeoutError:
+            with publication_lock:
+                if published.is_set():
+                    ExportRepository(settings.database_path).cleanup_files(settings.export_dir)
+                    return
+                cancelled.set()
+            try:
+                await asyncio.shield(worker)
+            except ScanCancelled:
+                pass
+            raise AppError(
+                "SCAN_TIMEOUT",
+                f"Az adatgyűjtés túllépte a konfigurált {settings.scan_max_seconds} másodperces időkorlátot.",
+                status_code=408,
+            )
         except asyncio.CancelledError:
             with publication_lock:
                 if published.is_set():

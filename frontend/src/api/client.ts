@@ -42,6 +42,8 @@ export interface ScanSummary {
   relationshipTypeCounts: Record<string, number>;
   externalObjectCount: number;
   unresolvedSynonymCount: number;
+  synonymCycleCount?: number;
+  synonymDepthExceededCount?: number;
   warnings: string[];
 }
 
@@ -72,6 +74,8 @@ export interface GraphEdge {
   origin: string;
   metadata: Record<string, unknown>;
   evidence: GraphEvidence[];
+  effectiveWeight?: number;
+  stepCost?: number;
 }
 
 export interface ObjectSearchResult {
@@ -143,6 +147,19 @@ export interface AnalysisRun {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+}
+
+export interface AnalysisEstimate {
+  estimatedNodeCount: number;
+  estimatedRelationshipCount: number;
+  sourceNodeCount: number;
+  sourceRelationshipCount: number;
+  estimatedMemoryBytes: number;
+  sizeCategory: "SMALL" | "MEDIUM" | "LARGE" | "OVERSIZED";
+  withinLimits: boolean;
+  limits: { maxNodes: number; maxEdges: number };
+  warnings: string[];
+  approximate: boolean;
 }
 
 export interface CommunityMetrics {
@@ -286,6 +303,8 @@ export const api = {
     q?: string;
     owner?: string;
     objectType?: string;
+    status?: string;
+    isExternal?: boolean;
     pageSize?: number;
   }) => {
     const query = new URLSearchParams();
@@ -298,6 +317,9 @@ export const api = {
     rootObjectIds: string[];
     depth: number;
     direction: "INCOMING" | "OUTGOING" | "BOTH";
+    relationshipTypes?: string[];
+    minimumConfidence?: number;
+    includeExternal?: boolean;
   }) => request<SubgraphResult>("/subgraph", {
     method: "POST",
     body: JSON.stringify(payload),
@@ -306,6 +328,9 @@ export const api = {
     objectId: string;
     mode: "DEPENDENTS" | "DEPENDENCIES";
     maxDepth?: number;
+    relationshipTypes?: string[];
+    minimumConfidence?: number;
+    includeExternal?: boolean;
   }) => request<SubgraphResult>("/impact", {
     method: "POST",
     body: JSON.stringify(payload),
@@ -316,6 +341,9 @@ export const api = {
     mode: "HOPS" | "WEIGHTED";
     directed: boolean;
     maxPaths: number;
+    relationshipTypes?: string[];
+    minimumConfidence?: number;
+    includeExternal?: boolean;
   }) => request<PathResult>("/paths", {
     method: "POST",
     body: JSON.stringify(payload),
@@ -333,6 +361,18 @@ export const api = {
     hubPolicy: "NONE" | "DEGREE_NORMALIZATION" | "EXCLUDE_TOP_HUBS";
     includeTechnicalObjects: boolean;
   }) => request<{ accepted: boolean; analysisId: string }>("/analyses", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }),
+  estimateAnalysis: (payload: {
+    name: string;
+    objective: "CPM" | "MODULARITY";
+    resolution: number;
+    seed: number;
+    minimumConfidence: number;
+    hubPolicy: "NONE" | "DEGREE_NORMALIZATION" | "EXCLUDE_TOP_HUBS";
+    includeTechnicalObjects: boolean;
+  }) => request<AnalysisEstimate>("/analyses/estimate", {
     method: "POST",
     body: JSON.stringify(payload),
   }),

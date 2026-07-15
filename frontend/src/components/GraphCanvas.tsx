@@ -22,6 +22,19 @@ const TYPE_COLORS: Record<string, string> = {
   EXTERNAL_OBJECT: "#d0d5dd",
 };
 
+const TYPE_SHAPES: Record<string, cytoscape.Css.NodeShape> = {
+  TABLE: "round-rectangle",
+  VIEW: "diamond",
+  MATERIALIZED_VIEW: "hexagon",
+  PACKAGE: "barrel",
+  PROCEDURE: "ellipse",
+  FUNCTION: "ellipse",
+  TRIGGER: "triangle",
+  INDEX: "rectangle",
+  SYNONYM: "vee",
+  EXTERNAL_OBJECT: "octagon",
+};
+
 export function GraphCanvas({ nodes, edges, onSelectNode, onSelectEdge }: GraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<Core | null>(null);
@@ -39,6 +52,7 @@ export function GraphCanvas({ nodes, edges, onSelectNode, onSelectEdge }: GraphC
             id: node.id,
             label: `${node.owner}.${node.name}`,
             color: TYPE_COLORS[node.objectType] ?? "#344054",
+            objectType: node.objectType,
             external: node.isExternal ? "yes" : "no",
             invalid: node.status === "INVALID" ? "yes" : "no",
           },
@@ -58,6 +72,7 @@ export function GraphCanvas({ nodes, edges, onSelectNode, onSelectEdge }: GraphC
           selector: "node",
           style: {
             "background-color": "data(color)",
+            shape: (element) => TYPE_SHAPES[element.data("objectType")] ?? "ellipse",
             label: "data(label)",
             color: "#101828",
             "font-size": 9,
@@ -71,6 +86,7 @@ export function GraphCanvas({ nodes, edges, onSelectNode, onSelectEdge }: GraphC
         },
         { selector: "node[external = 'yes']", style: { "background-opacity": 0.45 } },
         { selector: "node[invalid = 'yes']", style: { "border-color": "#d92d20", "border-width": 4 } },
+        { selector: "node.pinned", style: { "border-color": "#16b8c4", "border-width": 4 } },
         {
           selector: "edge",
           style: {
@@ -102,6 +118,16 @@ export function GraphCanvas({ nodes, edges, onSelectNode, onSelectEdge }: GraphC
       const edge = edgeMap.get(event.target.id());
       if (edge) onSelectEdge(edge);
     });
+    graph.on("cxttap", "node", (event: EventObject) => {
+      const node = event.target;
+      if (node.locked()) {
+        node.unlock();
+        node.removeClass("pinned");
+      } else {
+        node.lock();
+        node.addClass("pinned");
+      }
+    });
     graphRef.current = graph;
     return () => {
       graph.destroy();
@@ -109,5 +135,15 @@ export function GraphCanvas({ nodes, edges, onSelectNode, onSelectEdge }: GraphC
     };
   }, [edges, nodes, onSelectEdge, onSelectNode]);
 
-  return <div className="graph-canvas" ref={containerRef} aria-label="Objektumgráf" />;
+  return (
+    <div className="graph-canvas-shell">
+      <button
+        className="graph-layout-button"
+        type="button"
+        title="A jobb kattintással rögzített node-ok a helyükön maradnak."
+        onClick={() => graphRef.current?.layout({ name: "cose", animate: false, fit: true, padding: 35 }).run()}
+      >Elrendezés újrafuttatása</button>
+      <div className="graph-canvas" ref={containerRef} aria-label="Objektumgráf" />
+    </div>
+  );
 }
