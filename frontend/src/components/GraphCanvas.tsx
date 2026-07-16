@@ -88,15 +88,15 @@ export function GraphCanvas({ nodes, edges, onSelectNode, onSelectEdge }: GraphC
             shape: (element) => TYPE_SHAPES[element.data("objectType")] ?? "ellipse",
             label: "data(label)",
             color: "#344054",
-            "font-size": 5.5,
+            "font-size": 7,
             "text-valign": "bottom",
             "text-margin-y": 5,
             "text-wrap": "ellipsis",
             "text-max-width": "76px",
             "text-outline-color": "#ffffff",
             "text-outline-width": 1,
-            width: 24,
-            height: 24,
+            width: 29,
+            height: 29,
             "border-width": 2,
             "border-color": "#ffffff",
           },
@@ -181,14 +181,23 @@ export function GraphCanvas({ nodes, edges, onSelectNode, onSelectEdge }: GraphC
   return (
     <div className="graph-canvas-shell">
       <div className="graph-canvas-actions" aria-label="Aktuális objektumgráf műveletei">
-        <button type="button" onClick={() => exportView("PNG")}>Aktuális nézet PNG</button>
-        <button type="button" onClick={() => exportView("SVG")}>Aktuális nézet SVG</button>
+        <button type="button" title="Az aktuális nagyítás és elrendezés mentése PNG-képként" onClick={() => exportView("PNG")}>PNG mentése</button>
+        <button type="button" title="Az aktuális nagyítás és elrendezés mentése vektoros SVG-ként" onClick={() => exportView("SVG")}>SVG mentése</button>
         <button
           type="button"
-          title="A jobb kattintással rögzített node-ok a helyükön maradnak."
+          title="Újrarendezi a gráfot. A jobb kattintással rögzített elemek a helyükön maradnak."
           onClick={() => graphRef.current?.layout({ name: "cose", animate: false, fit: true, padding: 35 }).run()}
-        >Elrendezés újrafuttatása</button>
+        >Újrarendezés</button>
       </div>
+      <details className="graph-legend">
+        <summary>Jelmagyarázat és kezelés</summary>
+        <div>
+          <span><i className="legend-swatch legend-table" />Tábla</span>
+          <span><i className="legend-swatch legend-view" />Nézet</span>
+          <span><i className="legend-swatch legend-code" />Kódobjektum</span>
+          <small>Görgő: nagyítás · húzás: mozgatás · jobb klikk: rögzítés</small>
+        </div>
+      </details>
       <div className="graph-canvas" ref={containerRef} aria-label="Objektumgráf" />
     </div>
   );

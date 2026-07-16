@@ -11,6 +11,7 @@ import {
   type SubgraphResult,
 } from "../api/client";
 import { GraphCanvas } from "./GraphCanvas";
+import { EmptyGraphIllustration } from "./GraphIllustration";
 
 
 const EMPTY_GRAPH: SubgraphResult = { nodes: [], edges: [], truncated: false, suggestion: null };
@@ -167,21 +168,25 @@ export function GraphExplorer({
   }
 
   return (
-    <section className="explorer-panel">
+    <section className="explorer-panel" id="graph" aria-labelledby="graph-title">
       <div className="scan-heading">
         <span className="scan-number">03</span>
-        <div><p className="overline">Természetes struktúra</p><h3>Összefüggő komponensek és részgráfok</h3></div>
+        <div>
+          <p className="overline">Természetes struktúra</p>
+          <h3 id="graph-title">Összefüggő komponensek és részgráfok</h3>
+          <p className="section-description">Szűrj, jelölj ki komponenseket, majd mentsd őket részgráfként a közösségelemzéshez.</p>
+        </div>
         {activeSubgraph && <span className="explorer-root">Aktív: {activeSubgraph.name}</span>}
       </div>
       {error && <div className="error-banner" role="alert"><strong>Gráfhiba</strong><span>{error}</span></div>}
 
       <div className="natural-graph-controls">
-        <label>Minimum node<input aria-label="Minimum komponensméret" type="number" min="1" value={minimumComponentSize} onChange={(event) => setMinimumComponentSize(Math.max(1, Number(event.target.value)))} /></label>
+        <label>Minimum elemszám<input aria-label="Minimum komponensméret" type="number" min="1" value={minimumComponentSize} onChange={(event) => setMinimumComponentSize(Math.max(1, Number(event.target.value)))} /></label>
         <label>Név vagy tartalom<input aria-label="Komponens keresése" value={componentQuery} onChange={(event) => setComponentQuery(event.target.value)} placeholder="például ORDER vagy SALES" /></label>
         <label>Séma<input aria-label="Komponens séma" value={owner} onChange={(event) => setOwner(event.target.value)} placeholder="SALES" /></label>
         <label>Objektumtípus<input aria-label="Komponens objektumtípus" value={objectType} onChange={(event) => setObjectType(event.target.value)} placeholder="TABLE" /></label>
         <label>Szerkezet<select value={topology} onChange={(event) => setTopology(event.target.value as typeof topology)}><option value="ALL">Mind</option><option value="TREE">Fa</option><option value="CYCLIC">Ciklusos</option><option value="ISOLATED">Izolált</option></select></label>
-        <button type="button" onClick={() => void loadOverview()} disabled={busy || !dataVersion}>Szűrés alkalmazása</button>
+        <button type="button" onClick={() => void loadOverview()} disabled={busy || !dataVersion}>{busy ? "Frissítés…" : "Szűrés alkalmazása"}</button>
       </div>
 
       <div className="natural-graph-layout">
@@ -201,7 +206,7 @@ export function GraphExplorer({
         <div className="graph-workspace">
           {displayedGraph.nodes.length > 0
             ? <GraphCanvas nodes={displayedGraph.nodes} edges={displayedGraph.edges} onSelectNode={(node) => { setSelectedNode(node); setSelectedEdge(null); }} onSelectEdge={(edge) => { setSelectedEdge(edge); setSelectedNode(null); }} />
-            : <div className="graph-placeholder"><span>⌘</span><p>Jelölj ki egy vagy több összefüggő komponenst, vagy nyiss meg egy mentett részgráfot.</p></div>}
+            : <div className="graph-placeholder"><EmptyGraphIllustration /><strong>A gráf megjelenítésre kész</strong><p>Jelölj ki bal oldalt egy vagy több komponenst, vagy nyiss meg egy mentett részgráfot.</p></div>}
           {displayedGraph.truncated && <p className="graph-notice warning">{displayedGraph.suggestion}</p>}
           {selectedComponents.size > 0 && !activeSubgraph && (
             <div className="save-subgraph-bar">

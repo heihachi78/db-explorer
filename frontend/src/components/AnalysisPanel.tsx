@@ -461,10 +461,14 @@ export function AnalysisPanel({
   const anyActive = analysisPollingActive;
 
   return (
-    <section className="analysis-panel">
+    <section className="analysis-panel" id="analysis" aria-labelledby="analysis-title">
       <div className="scan-heading">
         <span className="scan-number">04</span>
-        <div><p className="overline">Közösségelemzés</p><h3>Leiden futások és elemzői nézetek</h3></div>
+        <div>
+          <p className="overline">Közösségelemzés</p>
+          <h3 id="analysis-title">Leiden futások és elemzői nézetek</h3>
+          <p className="section-description">Indíts elemzést az aktív részgráfon, majd vizsgáld meg és hasonlítsd össze az eredményeket.</p>
+        </div>
         <span className="analysis-run-count">{activeSubgraph ? `${activeSubgraph.name} · ${activeSubgraph.nodeCount} node` : "Előbb válassz részgráfot"}</span>
       </div>
       {error && <div className="error-banner" role="alert"><strong>Elemzési hiba</strong><span>{error}</span></div>}
@@ -475,14 +479,14 @@ export function AnalysisPanel({
           {!activeSubgraph && <p className="analysis-warning">A közösségelemzés csak egy elnevezett, aktív részgráfon indítható.</p>}
           <label>Név<input value={name} onChange={(event) => setName(event.target.value)} required /></label>
           <div className="analysis-form-row">
-            <label>Objective<select value={objective} onChange={(event) => setObjective(event.target.value as typeof objective)}><option>CPM</option><option>MODULARITY</option></select></label>
-            <label>Resolution<input type="number" min="0.01" max="100" step="0.01" value={resolution} onChange={(event) => setResolution(Number(event.target.value))} /></label>
+            <label>Célfüggvény<select value={objective} onChange={(event) => setObjective(event.target.value as typeof objective)}><option>CPM</option><option>MODULARITY</option></select></label>
+            <label>Felbontás<input type="number" min="0.01" max="100" step="0.01" value={resolution} onChange={(event) => setResolution(Number(event.target.value))} /></label>
           </div>
           <div className="analysis-form-row">
-            <label>Seed<input type="number" value={seed} onChange={(event) => setSeed(Number(event.target.value))} /></label>
-            <label>Min. confidence<input type="number" min="0" max="1" step="0.05" value={minimumConfidence} onChange={(event) => setMinimumConfidence(Number(event.target.value))} /></label>
+            <label>Véletlenmag<input type="number" value={seed} onChange={(event) => setSeed(Number(event.target.value))} /></label>
+            <label>Min. bizonyosság<input type="number" min="0" max="1" step="0.05" value={minimumConfidence} onChange={(event) => setMinimumConfidence(Number(event.target.value))} /></label>
           </div>
-          <label>Hub policy<select value={hubPolicy} onChange={(event) => setHubPolicy(event.target.value as typeof hubPolicy)}><option value="DEGREE_NORMALIZATION">Fokszám-normalizálás</option><option value="NONE">Nincs korrekció</option><option value="EXCLUDE_TOP_HUBS">Top 1% kizárása</option></select></label>
+          <label>Központi elemek kezelése<select value={hubPolicy} onChange={(event) => setHubPolicy(event.target.value as typeof hubPolicy)}><option value="DEGREE_NORMALIZATION">Fokszám-normalizálás</option><option value="NONE">Nincs korrekció</option><option value="EXCLUDE_TOP_HUBS">Top 1% kizárása</option></select></label>
           <label className="checkbox-label"><input type="checkbox" checked={includeTechnicalObjects} onChange={(event) => setIncludeTechnicalObjects(event.target.checked)} />Technikai objektumok bevonása</label>
           {includeTechnicalObjects && <p className="analysis-warning">Az indexek és synonymok torzíthatják a közösséghatárokat.</p>}
           <details className="hierarchy-config">

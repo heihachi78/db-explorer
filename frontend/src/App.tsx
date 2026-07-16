@@ -10,6 +10,7 @@ import {
   type NamedSubgraph,
 } from "./api/client";
 import { StatusPill } from "./components/StatusPill";
+import { ConnectionIllustration, HeroGraphIllustration } from "./components/GraphIllustration";
 
 const GraphExplorer = lazy(() => import("./components/GraphExplorer").then(
   (module) => ({ default: module.GraphExplorer }),
@@ -198,41 +199,68 @@ function App() {
   const relationshipCount = scanSummary
     ? Object.values(scanSummary.relationshipTypeCounts).reduce((total, count) => total + count, 0)
     : 0;
+  const workflowStep = scanSummary ? (activeSubgraph ? 4 : 3) : capabilities ? 2 : 1;
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">Ugrás a fő tartalomra</a>
       <header className="topbar">
         <div className="brand-mark" aria-hidden="true"><span /><span /><span /></div>
-        <div>
+        <div className="brand-copy">
           <p className="eyebrow">Oracle metadata workspace</p>
-          <h1>Database Graph Explorer</h1>
+          <h1>Adatbázis-gráf elemző</h1>
         </div>
+        <nav className="topbar-nav" aria-label="Fő navigáció">
+          <a href="#connection">Kapcsolat</a>
+          <a href="#scan">Adatgyűjtés</a>
+          <a href="#graph">Gráf</a>
+          <a href="#analysis">Elemzés</a>
+        </nav>
         <div className="topbar-status">
           <span className="pulse-dot" /> Helyi munkamenet
         </div>
       </header>
 
-      <main>
+      <main id="main-content">
         <section className="hero">
-          <div>
-            <p className="step-label">01 · Kapcsolat</p>
-            <h2>Térképezd fel az adatbázis<br />láthatatlan szerkezetét.</h2>
+          <div className="hero-content">
+            <p className="step-label">Oracle struktúrafelmérés</p>
+            <h2>Lásd át, mi mivel<br />függ össze.</h2>
             <p className="hero-copy">
-              Ellenőrizd a read-only Oracle kapcsolatot, majd válaszd ki az egyetlen közös gráfba kerülő sémákat.
+              Kapcsolódj biztonságosan, gyűjtsd össze a metaadatokat, majd fedezd fel és elemezd az adatbázis valódi szerkezetét egyetlen munkafelületen.
             </p>
           </div>
-          <div className="graph-decoration" aria-hidden="true">
-            <i className="node node-a" /><i className="node node-b" /><i className="node node-c" />
-            <i className="node node-d" /><i className="line line-a" /><i className="line line-b" /><i className="line line-c" />
+          <div className="graph-decoration">
+            <HeroGraphIllustration />
           </div>
         </section>
 
-        <section className="workspace-grid">
+        <nav className="workflow-nav" aria-label="Felmérési folyamat">
+          {[
+            [1, "Kapcsolat", "Ellenőrzés és sémaválasztás", "connection"],
+            [2, "Adatgyűjtés", "A forrásgráf elkészítése", "scan"],
+            [3, "Gráf", "Komponensek kiválasztása", "graph"],
+            [4, "Elemzés", "Közösségek feltárása", "analysis"],
+          ].map(([step, title, description, target]) => (
+            <a
+              key={String(step)}
+              href={`#${target}`}
+              className={`${Number(step) < workflowStep ? "complete" : ""} ${Number(step) === workflowStep ? "current" : ""}`}
+              aria-current={Number(step) === workflowStep ? "step" : undefined}
+            >
+              <span>{Number(step) < workflowStep ? "✓" : String(step).padStart(2, "0")}</span>
+              <strong>{title}</strong>
+              <small>{description}</small>
+            </a>
+          ))}
+        </nav>
+
+        <section className="workspace-grid" id="connection" aria-labelledby="connection-title">
           <article className="card connection-card">
             <div className="card-heading">
               <div>
-                <p className="overline">Kapcsolati profil</p>
-                <h3>Környezeti konfiguráció</h3>
+                <p className="overline">01 · Kapcsolat</p>
+                <h3 id="connection-title">Kapcsolati beállítások</h3>
               </div>
               <StatusPill ok={Boolean(config?.oracleConfigured)}>
                 {config?.oracleConfigured ? "Beállítva" : "Hiányos"}
@@ -255,7 +283,7 @@ function App() {
           <article className={`card result-card ${capabilities ? "result-card--ready" : ""}`}>
             {!capabilities ? (
               <div className="empty-state">
-                <div className="radar" aria-hidden="true"><span /><i /></div>
+                <ConnectionIllustration />
                 <h3>Kapcsolatra vár</h3>
                 <p>A sikeres teszt után itt jelenik meg a verzió, a container és a látható sémák összesítése.</p>
               </div>
@@ -271,12 +299,20 @@ function App() {
                   <div><span>Látható sémák</span><strong>{capabilities.schemas.length}</strong></div>
                 </div>
                 <div className="schema-preview">
-                  <p>Válaszd ki a felmérendő sémákat</p>
+                  <div className="selection-heading">
+                    <p>Felmérendő sémák</p>
+                    <span>{selectedSchemas.length} / {capabilities.schemas.length} kijelölve</span>
+                  </div>
+                  <div className="selection-actions">
+                    <button type="button" onClick={() => setSelectedSchemas(capabilities.schemas)}>Mind kijelölése</button>
+                    <button type="button" onClick={() => setSelectedSchemas([])}>Kijelölés törlése</button>
+                  </div>
                   <div>{capabilities.schemas.map((schema) => (
                     <button
                       type="button"
                       className={selectedSchemas.includes(schema) ? "selected" : ""}
                       key={schema}
+                      aria-pressed={selectedSchemas.includes(schema)}
                       onClick={() => toggleSchema(schema)}
                     >{schema}</button>
                   ))}</div>
@@ -285,15 +321,17 @@ function App() {
                   <summary>Objektumtípus-szűrés · {selectedObjectTypes.length || "minden"}</summary>
                   <div>
                     <button
-                      type="button"
-                      className={selectedObjectTypes.length === 0 ? "selected" : ""}
-                      onClick={() => setSelectedObjectTypes([])}
+                        type="button"
+                        className={selectedObjectTypes.length === 0 ? "selected" : ""}
+                        aria-pressed={selectedObjectTypes.length === 0}
+                        onClick={() => setSelectedObjectTypes([])}
                     >Minden típus</button>
                     {capabilities.objectTypes.map((objectType) => (
                       <button
                         type="button"
                         className={selectedObjectTypes.includes(objectType) ? "selected" : ""}
                         key={objectType}
+                        aria-pressed={selectedObjectTypes.includes(objectType)}
                         onClick={() => toggleObjectType(objectType)}
                       >{objectType}</button>
                     ))}
@@ -307,25 +345,26 @@ function App() {
 
         {error && <div className="error-banner" role="alert"><strong>Műveleti hiba</strong><span>{error}</span></div>}
 
-        <section className="scan-panel">
+        <section className="scan-panel" id="scan" aria-labelledby="scan-title">
           <div className="scan-heading">
             <span className="scan-number">02</span>
-            <div><p className="overline">Metaadatgyűjtés</p><h3>Többsémás forrásgráf</h3></div>
-            <StatusPill ok={scanSucceeded}>
-              {scanDisplayState}
-            </StatusPill>
+            <div><p className="overline">Metaadatgyűjtés</p><h3 id="scan-title">Többsémás forrásgráf</h3></div>
+            <div className="section-heading-actions">
+              <StatusPill ok={scanSucceeded}>{scanDisplayState}</StatusPill>
+              <button className="danger-button danger-button--quiet" type="button" onClick={() => void resetWorkspace()} disabled={scanActive || analysisActive || exportActive || loading}>Új felmérés · minden adat törlése</button>
+            </div>
           </div>
           <div className="scan-actions">
-            <div><strong>{selectedSchemas.length}</strong><span>kiválasztott séma</span></div>
-            <div><strong>{selectedObjectTypes.length || "Mind"}</strong><span>objektumtípus</span></div>
+            <div className="scan-action-metric"><strong>{selectedSchemas.length}</strong><span>kiválasztott séma</span></div>
+            <div className="scan-action-metric"><strong>{selectedObjectTypes.length || "Mind"}</strong><span>objektumtípus</span></div>
             <button
               className="primary-button"
               onClick={startScan}
               disabled={selectedSchemas.length === 0 || Boolean(scanSummary) || scanActive || analysisActive || exportActive || loading}
             >Adatgyűjtés indítása</button>
-            <button className="danger-button" type="button" onClick={() => void resetWorkspace()} disabled={scanActive || analysisActive || exportActive || loading}>Új felmérés · minden adat törlése</button>
             {scanActive && <button className="secondary-button" onClick={cancelScan}>Megszakítás</button>}
           </div>
+          {!scanSummary && selectedSchemas.length === 0 && <p className="action-hint">Az indításhoz előbb teszteld a kapcsolatot, majd jelölj ki legalább egy sémát.</p>}
           {scanSummary && <p className="operation-note">Új metaadatgyűjtés előtt indíts új felmérést. Ez megakadályozza a korábbi és az új adathalmaz keveredését.</p>}
           {scanStatus && (scanActive || scanSucceeded) && (
             <div className="scan-progress" aria-live="polite">
