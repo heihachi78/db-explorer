@@ -81,6 +81,7 @@ cd frontend && npm test -- --run && npm run build
 - irány-, kapcsolattípus- és confidence-szűrt, szerveroldalon limitált részgráf API;
 - ciklusbiztos dependents/dependencies hatáselemzés és hopszám- vagy súlyalapú útvonalkeresés;
 - Cytoscape gráfböngésző node/edge detail panellel, impact- és útvonalindítással, státusz-, kapcsolattípus-, confidence- és külsőobjektum-szűréssel;
+- a teljes publikált forrásgráf automatikus térképe gyengén összefüggő komponensekkel, fa/ciklusos/izolált szerkezeti jelöléssel, komponensméret- és tartalomszűréssel, valamint többes komponenskijelöléssel;
 - objektumtípusonként eltérő node-alakok, jobb kattintásos pozíciórögzítés és újrafuttatható gráfelrendezés;
 - a pillanatnyi pan/zoomot és renderelt node-pozíciókat megőrző PNG-, illetve valódi vektoros SVG-nézetexport az objektumgráfból és a közösségi térképből;
 - külön raw és analysis gráfréteg, owner-/objektumtípus-/confidence-szűréssel és package spec/body elemzési összevonással;
@@ -99,16 +100,18 @@ cd frontend && npm test -- --run && npm run build
 - perzisztált, összecsukható hierarchiafa helyi közösségmutatókkal és objektum-drill-downnal; a levéltagság egyszer tárolódik, a szülők tartalma leszármazotti lekérdezéssel áll elő;
 - kijelölt futások összehasonlító táblája és resolution-görbéje, valamint címkefüggetlen particionálási egyezésmutatók;
 - determinisztikus JSON, CSV-csomag, SVG és PNG elemzésexport, hierarchikus futásnál külön fa- és levéltagság-táblákkal, státusz- és letöltési API-val, árva fájlok automatikus takarításával;
+- egyetlen aktuális exporteredmény: új export indításakor minden korábbi exportrekord és -fájl automatikusan törlődik;
 - egyszolgáltatásos Docker Compose futtatás, egy Uvicorn workerrel.
 
 ## Elemzői munkafolyamat
 
-1. Indíts egy önálló Leiden-futást, egy hatpontos resolution-profilt vagy az öt seedből álló stabilitásprofilt.
-2. Jelölj ki legalább két sikeres futást a futáslistában, majd hasonlítsd össze a paramétereket, a közösségszámot, quality/conductance értékeket, valamint az ARI/NMI/VI egyezést.
-3. Nyiss meg egy futást, és használd a community mapet, a schema–community mátrixot és a legjobb/legrosszabb conductance listát. A közösségre kattintva megjelenik a névjavaslat indoklása, a top hubok és bridge-ek.
-4. A „Kísérleti hierarchia” beállításaiban alacsony alap-resolutionnel indíthatsz rekurzív felosztást. A ponttal tagolt útvonalakhoz (`0`, `0.2`) külön resolution adható; a mélység- és közösségszám-limit védi a futást a túlzott felbontástól. Az eredményfa ágainak helyi mutatói és objektumai külön megnyithatók.
-5. A javasolt nevet helyi címkével és elemzői megjegyzéssel írhatod felül. Ezek az aktuális SQLite-adathalmazhoz tartoznak, új scan után nem öröklődnek tovább.
-6. A JSON export a konfigurációt, node-okat, kapcsolatokat, tagságokat és mutatókat együtt tartalmazza; a CSV ZIP külön táblákat ad, hierarchikus futásnál `hierarchy.csv` és `hierarchy_memberships.csv` fájlokkal. A futásexport SVG/PNG formátuma determinisztikus aggregált közösségi térképet készít. A gráfok saját „Aktuális nézet” gombjai ezzel szemben pontosan a pillanatnyi interaktív pan/zoomot és node-pozíciókat mentik.
+1. A „Teljes térkép” nézetben ellenőrizd, hány összefüggő komponensre bomlik a publikált objektumhalmaz. Szűrj komponensméretre, fa/ciklusos/izolált szerkezetre vagy névre, majd jelölj ki egy vagy több komponenst részletes vizsgálatra.
+2. Indíts egy önálló Leiden-futást, egy hatpontos resolution-profilt vagy az öt seedből álló stabilitásprofilt.
+3. Jelölj ki legalább két sikeres futást a futáslistában, majd hasonlítsd össze a paramétereket, a közösségszámot, quality/conductance értékeket, valamint az ARI/NMI/VI egyezést.
+4. Nyiss meg egy futást, és használd a community mapet, a schema–community mátrixot és a legjobb/legrosszabb conductance listát. A közösségre kattintva megjelenik a névjavaslat indoklása, a top hubok és bridge-ek.
+5. A „Kísérleti hierarchia” beállításaiban alacsony alap-resolutionnel indíthatsz rekurzív felosztást. A ponttal tagolt útvonalakhoz (`0`, `0.2`) külön resolution adható; a mélység- és közösségszám-limit védi a futást a túlzott felbontástól. Az eredményfa ágainak helyi mutatói és objektumai külön megnyithatók.
+6. A javasolt nevet helyi címkével és elemzői megjegyzéssel írhatod felül. Ezek az aktuális SQLite-adathalmazhoz tartoznak, új scan után nem öröklődnek tovább.
+7. A JSON export a konfigurációt, node-okat, kapcsolatokat, tagságokat és mutatókat együtt tartalmazza; a CSV ZIP külön táblákat ad, hierarchikus futásnál `hierarchy.csv` és `hierarchy_memberships.csv` fájlokkal. A futásexport SVG/PNG formátuma determinisztikus aggregált közösségi térképet készít. A gráfok saját „Aktuális nézet” gombjai ezzel szemben pontosan a pillanatnyi interaktív pan/zoomot és node-pozíciókat mentik. Új export indításakor a korábbi export törlődik.
 
 A stabilitási címke alapértelmezett küszöbei: `STABLE ≥ 0,80`, `MIXED ≥ 0,55`, ez alatt `UNSTABLE`. A node-pontszám legfeljebb tíz, az elemzési gráfban megmaradó fő szomszéddal való együttklaszterezés gyakorisága a seed-futások között.
 
@@ -116,6 +119,6 @@ A stabilitási címke alapértelmezett küszöbei: `STABLE ≥ 0,80`, `MIXED ≥
 
 A karcsúsított terv funkcionális követelményei elkészültek. A 2026-07-15-i átadási próbán a production Docker image üres adatkönyvtárból indult, Oracle 23.26.2 adatbázishoz read-only módban kapcsolódott, majd a kapcsolat → többsémás scan → kontrollminta → Leiden-elemzés → JSON-export folyamat sikeresen végigfutott. A próba 740 objektumot és 924 forráskapcsolatot gyűjtött; az elemzés 502 csomóponton és 302 aggregált élen 305 közösséget készített.
 
-Az automatikus regresszió 44 backend- és 11 frontendtesztből áll; a frontend production build és a Docker image buildje is sikeres. Más céladatbázis használatakor a kézi kontrollminta megismétlése továbbra is a felmérés része, nem külön fejlesztési vagy üzemeltetési projekt. Golden Oracle-környezet, általános nagygráf-benchmark, tartós fájllog és vállalati üzemeltetési réteg nem része a scope-nak.
+Az automatikus regresszió 46 backend- és 14 frontendtesztből áll; a frontend production build és a Docker image buildje is sikeres. Más céladatbázis használatakor a kézi kontrollminta megismétlése továbbra is a felmérés része, nem külön fejlesztési vagy üzemeltetési projekt. Golden Oracle-környezet, általános nagygráf-benchmark, tartós fájllog és vállalati üzemeltetési réteg nem része a scope-nak.
 
 Részletes terv: [oracle-adatbazis-graf-megvalositasi-terv.md](oracle-adatbazis-graf-megvalositasi-terv.md)

@@ -25,6 +25,11 @@ const ACTIVE_ANALYSIS_STATES = new Set([
   "PREPARING_ANALYSIS", "DETECTING_COMMUNITIES",
   "CALCULATING_METRICS", "SAVING_RESULTS", "ASSESSING_STABILITY",
 ]);
+const ACTIVE_TASK_STATES = new Set([
+  ...ACTIVE_SCAN_STATES,
+  ...ACTIVE_ANALYSIS_STATES,
+  "EXPORTING",
+]);
 
 function App() {
   const [config, setConfig] = useState<PublicConfig | null>(null);
@@ -33,6 +38,7 @@ function App() {
   const [selectedObjectTypes, setSelectedObjectTypes] = useState<string[]>([]);
   const [scanStatus, setScanStatus] = useState<ScanStatus | null>(null);
   const [scanSummary, setScanSummary] = useState<ScanSummary | null>(null);
+  const [scanRevision, setScanRevision] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,31 +50,51 @@ function App() {
 
   useEffect(() => {
     let disposed = false;
-    let summaryLoaded = false;
-
-    async function poll() {
+    async function loadInitialStatus() {
       try {
         const nextStatus = await api.scanStatus();
         if (disposed) return;
         setScanStatus(nextStatus);
-        if (ACTIVE_SCAN_STATES.has(nextStatus.state)) {
-          summaryLoaded = false;
-        } else if (!summaryLoaded) {
-          summaryLoaded = true;
-          setScanSummary(await api.scanSummary());
+        if (!ACTIVE_TASK_STATES.has(nextStatus.state)) {
+          const nextSummary = await api.scanSummary();
+          if (!disposed) setScanSummary(nextSummary);
         }
       } catch {
         // Configuration and connection actions surface server availability errors.
       }
     }
+    void loadInitialStatus();
+    return () => {
+      disposed = true;
+    };
+  }, []);
 
-    void poll();
-    const timer = setInterval(poll, 1000);
+  useEffect(() => {
+    if (!scanStatus || !ACTIVE_TASK_STATES.has(scanStatus.state)) return;
+    let disposed = false;
+    const scanWasActive = ACTIVE_SCAN_STATES.has(scanStatus.state);
+    async function poll() {
+      try {
+        const nextStatus = await api.scanStatus();
+        if (disposed) return;
+        setScanStatus(nextStatus);
+        if (scanWasActive && !ACTIVE_SCAN_STATES.has(nextStatus.state)) {
+          const nextSummary = await api.scanSummary();
+          if (!disposed) {
+            setScanSummary(nextSummary);
+            setScanRevision((current) => current + 1);
+          }
+        }
+      } catch {
+        // A következő aktív polling kör újrapróbálja.
+      }
+    }
+    const timer = setInterval(() => { void poll(); }, 1000);
     return () => {
       disposed = true;
       clearInterval(timer);
     };
-  }, []);
+  }, [scanStatus?.state]);
 
   async function testConnection() {
     setLoading(true);
@@ -319,10 +345,10 @@ function App() {
           )}
         </section>
         <Suspense fallback={<div className="explorer-loading">Gráfböngésző betöltése…</div>}>
-          <GraphExplorer />
+          <GraphExplorer dataVersion={lastOperationWasExport || lastOperationWasAnalysis ? null : scanStatus?.finished_at} />
         </Suspense>
         <Suspense fallback={<div className="explorer-loading">Elemzőfelület betöltése…</div>}>
-          <AnalysisPanel operationActive={scanActive || analysisActive || exportActive} />
+          <AnalysisPanel operationActive={scanActive || analysisActive || exportActive} sourceRevision={scanRevision} />
         </Suspense>
       </main>
     </div>

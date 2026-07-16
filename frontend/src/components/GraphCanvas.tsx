@@ -2,6 +2,7 @@ import cytoscape, { type Core, type EventObject } from "cytoscape";
 import { useEffect, useRef } from "react";
 
 import type { GraphEdge, GraphNode } from "../api/client";
+import { compactObjectLabel } from "../graph/labels";
 import { exportCurrentView, type ViewExportFormat } from "../graph/viewExport";
 
 interface GraphCanvasProps {
@@ -57,7 +58,8 @@ export function GraphCanvas({ nodes, edges, onSelectNode, onSelectEdge }: GraphC
         ...nodes.map((node) => ({
           data: {
             id: node.id,
-            label: `${node.owner}.${node.name}`,
+            label: compactObjectLabel(node.owner, node.name),
+            fullLabel: `${node.owner}.${node.name}`,
             color: TYPE_COLORS[node.objectType] ?? "#344054",
             objectType: node.objectType,
             external: node.isExternal ? "yes" : "no",
@@ -81,10 +83,14 @@ export function GraphCanvas({ nodes, edges, onSelectNode, onSelectEdge }: GraphC
             "background-color": "data(color)",
             shape: (element) => TYPE_SHAPES[element.data("objectType")] ?? "ellipse",
             label: "data(label)",
-            color: "#101828",
-            "font-size": 9,
+            color: "#344054",
+            "font-size": 5.5,
             "text-valign": "bottom",
-            "text-margin-y": 7,
+            "text-margin-y": 5,
+            "text-wrap": "ellipsis",
+            "text-max-width": "76px",
+            "text-outline-color": "#ffffff",
+            "text-outline-width": 1,
             width: 24,
             height: 24,
             "border-width": 2,
@@ -95,6 +101,16 @@ export function GraphCanvas({ nodes, edges, onSelectNode, onSelectEdge }: GraphC
         { selector: "node[invalid = 'yes']", style: { "border-color": "#d92d20", "border-width": 4 } },
         { selector: "node.pinned", style: { "border-color": "#16b8c4", "border-width": 4 } },
         {
+          selector: "node.hover-label",
+          style: {
+            label: "data(fullLabel)",
+            "text-wrap": "none",
+            "text-background-color": "#ffffff",
+            "text-background-opacity": 0.92,
+            "text-background-padding": "2px",
+          },
+        },
+        {
           selector: "edge",
           style: {
             width: 1.5,
@@ -102,13 +118,17 @@ export function GraphCanvas({ nodes, edges, onSelectNode, onSelectEdge }: GraphC
             "target-arrow-color": "#98a2b3",
             "target-arrow-shape": "triangle",
             "curve-style": "bezier",
-            label: "data(label)",
-            "font-size": 7,
+            label: "",
+            "font-size": 4.5,
             color: "#667085",
             "text-background-color": "#ffffff",
             "text-background-opacity": 0.85,
             "text-background-padding": "2px",
           },
+        },
+        {
+          selector: "edge.hover-label, edge:selected",
+          style: { label: "data(label)" },
         },
         { selector: "edge[confidence < 0.8]", style: { "line-style": "dashed", opacity: 0.65 } },
         { selector: ":selected", style: { "overlay-color": "#16b8c4", "overlay-opacity": 0.18 } },
@@ -124,6 +144,18 @@ export function GraphCanvas({ nodes, edges, onSelectNode, onSelectEdge }: GraphC
     graph.on("tap", "edge", (event: EventObject) => {
       const edge = edgeMap.get(event.target.id());
       if (edge) onSelectEdge(edge);
+    });
+    graph.on("mouseover", "node", (event: EventObject) => {
+      event.target.addClass("hover-label");
+    });
+    graph.on("mouseout", "node", (event: EventObject) => {
+      event.target.removeClass("hover-label");
+    });
+    graph.on("mouseover", "edge", (event: EventObject) => {
+      event.target.addClass("hover-label");
+    });
+    graph.on("mouseout", "edge", (event: EventObject) => {
+      event.target.removeClass("hover-label");
     });
     graph.on("cxttap", "node", (event: EventObject) => {
       const node = event.target;

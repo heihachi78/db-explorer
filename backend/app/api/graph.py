@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, Request
 
-from app.api.models import ImpactRequest, PathsRequest, SubgraphRequest
+from app.api.models import GraphOverviewRequest, ImpactRequest, PathsRequest, SubgraphRequest
 from app.errors import AppError
 from app.graph.traversal import (
     DEFAULT_EDGE_WEIGHTS,
@@ -11,6 +11,7 @@ from app.graph.traversal import (
     find_paths,
     impact_graph,
 )
+from app.graph.overview import build_graph_overview
 from app.persistence.graph_repository import GraphRepository
 
 
@@ -106,6 +107,20 @@ def subgraph(payload: SubgraphRequest, request: Request) -> dict:
         minimum_confidence=payload.minimumConfidence,
         include_external=payload.includeExternal,
         limits=ViewLimits(payload.maxNodes, payload.maxEdges),
+    )
+
+
+@router.post("/graph-overview")
+def graph_overview(payload: GraphOverviewRequest, request: Request) -> dict:
+    return build_graph_overview(
+        _repository(request),
+        query=payload.query,
+        owners=tuple(payload.owners),
+        object_types=tuple(payload.objectTypes),
+        statuses=tuple(payload.statuses),
+        relationship_types=tuple(payload.relationshipTypes),
+        minimum_confidence=payload.minimumConfidence,
+        include_external=payload.includeExternal,
     )
 
 

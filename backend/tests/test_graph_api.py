@@ -17,6 +17,7 @@ def _seed_graph(path: Path) -> None:
         ("B", "TABLE", "ORDERS", 0),
         ("C", "VIEW", "ORDER_VIEW", 0),
         ("X", "EXTERNAL_OBJECT", "CUSTOMERS", 1),
+        ("Y", "TABLE", "AUDIT_ARCHIVE", 0),
     ]
     relationships = [
         ("ab", "A", "B", "DEPENDS_ON", 1.0),
@@ -157,3 +158,43 @@ def test_graph_api_uses_uniform_not_found_and_validation_errors(tmp_path: Path) 
     assert missing.json()["code"] == "OBJECT_NOT_FOUND"
     assert invalid.status_code == 422
     assert invalid.json()["code"] == "VALIDATION_ERROR"
+
+
+def test_graph_overview_returns_complete_components_and_preserves_edges(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        response = client.post("/api/graph-overview", json={})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"] == {
+        "sourceNodeCount": 5,
+        "sourceEdgeCount": 5,
+        "nodeCount": 5,
+        "edgeCount": 5,
+        "componentCount": 2,
+        "isolatedNodeCount": 1,
+        "treeComponentCount": 0,
+        "cyclicComponentCount": 1,
+    }
+    assert [(item["nodeCount"], item["topology"]) for item in payload["components"]] == [
+        (4, "CYCLIC"), (1, "ISOLATED"),
+    ]
+    assert {edge["id"] for edge in payload["edges"]} == {"ab", "ca", "bc", "cb", "bx"}
+    assert {node["id"]: node["componentId"] for node in payload["nodes"]}["Y"] == "component-2"
+
+
+def test_graph_overview_recomputes_components_after_filters(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        response = client.post("/api/graph-overview", json={
+            "objectTypes": ["TABLE", "VIEW"],
+            "relationshipTypes": ["DEPENDS_ON"],
+            "minimumConfidence": 0.8,
+            "includeExternal": False,
+        })
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert {node["id"] for node in payload["nodes"]} == {"B", "C", "Y"}
+    assert [edge["id"] for edge in payload["edges"]] == ["bc"]
+    assert payload["summary"]["componentCount"] == 2
+    assert payload["components"][0]["topology"] == "TREE"

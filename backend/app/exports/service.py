@@ -172,6 +172,7 @@ class ExportService:
     ) -> None:
         if not self.repository.mark_running(export_id):
             raise ExportCancelled("Export was cancelled before it started.")
+        self.repository.clear_previous(export_id, self.export_dir)
         report(TaskState.EXPORTING, message=f"Generating deterministic {export_format} export.")
         snapshot = self.repository.snapshot(analysis_id)
         if snapshot is None:

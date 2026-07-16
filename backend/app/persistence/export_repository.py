@@ -85,6 +85,26 @@ class ExportRepository:
             connection.commit()
         return cursor.rowcount
 
+    def clear_previous(self, current_export_id: str, export_dir: Path) -> int:
+        """Remove every earlier export record and its file, keeping the running job."""
+        export_root = export_dir.resolve()
+        with database(self.path, read_only=True) as connection:
+            rows = connection.execute(
+                "SELECT file_path FROM export_jobs WHERE id <> ? AND file_path IS NOT NULL",
+                (current_export_id,),
+            ).fetchall()
+        for row in rows:
+            path = Path(row["file_path"]).resolve()
+            if export_root in path.parents:
+                path.unlink(missing_ok=True)
+        with database(self.path) as connection:
+            cursor = connection.execute(
+                "DELETE FROM export_jobs WHERE id <> ?",
+                (current_export_id,),
+            )
+            connection.commit()
+        return cursor.rowcount
+
     def cleanup_files(self, export_dir: Path) -> int:
         export_dir.mkdir(parents=True, exist_ok=True)
         with database(self.path, read_only=True) as connection:

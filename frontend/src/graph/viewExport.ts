@@ -147,7 +147,7 @@ function graphSnapshot(graph: Core, container: HTMLElement, title: string): SvgV
     const position = node.renderedPosition();
     return {
       id: node.id(),
-      label: String(node.data("label") ?? ""),
+      label: String(node.style("label") ?? node.data("label") ?? ""),
       x: position.x,
       y: position.y,
       width: node.renderedWidth(),
@@ -165,7 +165,7 @@ function graphSnapshot(graph: Core, container: HTMLElement, title: string): SvgV
     id: edge.id(),
     source: edge.source().id(),
     target: edge.target().id(),
-    label: String(edge.data("label") ?? ""),
+    label: String(edge.style("label") ?? ""),
     color: String(edge.style("line-color")),
     width: numericStyle(String(edge.style("width")), 1),
     opacity: numericStyle(String(edge.style("opacity")), 1),

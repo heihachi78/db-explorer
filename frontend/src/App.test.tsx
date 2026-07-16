@@ -239,6 +239,46 @@ test("searches graph objects without loading the full graph", async () => {
   ));
 });
 
+test("shows the complete graph component map after a published scan", async () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input);
+    const body = url.endsWith("/graph-overview") ? {
+      nodes: [],
+      edges: [],
+      components: [{
+        id: "component-1", nodeCount: 12, edgeCount: 11, topology: "TREE",
+        density: 0.16, externalNodeCount: 0, invalidNodeCount: 0,
+        owners: { SALES: 12 }, objectTypes: { TABLE: 8 },
+        relationshipTypes: { DEPENDS_ON: 11 },
+        sampleObjects: [{ id: "A", label: "SALES.ORDERS" }],
+      }],
+      summary: {
+        sourceNodeCount: 12, sourceEdgeCount: 11, nodeCount: 12, edgeCount: 11,
+        componentCount: 1, isolatedNodeCount: 0, treeComponentCount: 1,
+        cyclicComponentCount: 0,
+      },
+      facets: { owners: { SALES: 12 }, objectTypes: { TABLE: 8 }, statuses: { VALID: 12 }, relationshipTypes: { DEPENDS_ON: 11 } },
+    } : url.endsWith("/scan/status") ? {
+      state: "SUCCEEDED", phase: "PUBLISHING", progress_current: 1,
+      progress_total: 1, message: "Operation completed.", error_code: null,
+      error_message: null, counters: {}, started_at: "2026-07-16T07:00:00Z",
+      finished_at: "2026-07-16T07:01:00Z",
+    } : url.endsWith("/scan/summary") ? { available: false, summary: null }
+      : url.endsWith("/analyses") ? { items: [] }
+        : { oracleConfigured: true, oracleMode: "thin", dataFilePresent: true, activeOperation: false, limits: {} };
+    return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+  });
+
+  render(<App />);
+
+  expect(await screen.findByText("12 node · 11 él")).toBeInTheDocument();
+  expect(screen.getByText("Fa · SALES")).toBeInTheDocument();
+  expect(globalThis.fetch).toHaveBeenCalledWith(
+    "/api/graph-overview",
+    expect.objectContaining({ method: "POST" }),
+  );
+});
+
 test("shows persisted analysis metrics and starts a resolution profile", async () => {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
@@ -445,6 +485,42 @@ test("disables analysis starts while a scan is active", async () => {
 
   expect(await screen.findByRole("button", { name: "Elemzés indítása" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "6 pontos resolution profil" })).toBeDisabled();
+});
+
+test("starts an analysis even while the background estimate is still loading", async () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    if (url.endsWith("/analyses/estimate")) {
+      return new Promise<Response>(() => {});
+    }
+    const body = url.endsWith("/analyses") && method === "POST"
+      ? { accepted: true, analysisId: "analysis-new" }
+      : url.endsWith("/analyses") ? { items: [] }
+        : url.endsWith("/scan/status") ? {
+          state: "IDLE", phase: null, progress_current: 0, progress_total: null,
+          message: null, error_code: null, error_message: null, counters: {},
+          started_at: null, finished_at: null,
+        } : url.endsWith("/scan/summary") ? { available: false, summary: null }
+          : { oracleConfigured: true, oracleMode: "thin", dataFilePresent: true, activeOperation: false, limits: {} };
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+
+  render(<App />);
+  const startButton = await screen.findByRole("button", { name: "Elemzés indítása" });
+  expect(startButton).toBeEnabled();
+  const analysisForm = startButton.closest("form") as HTMLFormElement;
+  expect(analysisForm.noValidate).toBe(true);
+  expect(analysisForm.checkValidity()).toBe(true);
+  fireEvent.click(startButton);
+
+  await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith(
+    "/api/analyses",
+    expect.objectContaining({ method: "POST" }),
+  ));
 });
 
 test("starts an experimental hierarchy with recursive parameters", async () => {

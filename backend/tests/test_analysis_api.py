@@ -406,6 +406,7 @@ def test_deterministic_json_csv_svg_and_png_exports(tmp_path: Path) -> None:
         }).json()["analysisId"]
         assert _wait_for_analysis(client, analysis_id)["status"] == "SUCCEEDED"
         downloads = {}
+        previous_export_id = None
         for export_format in ("JSON", "CSV", "SVG", "PNG", "JSON"):
             started = client.post("/api/export", json={
                 "analysisId": analysis_id, "format": export_format,
@@ -416,6 +417,10 @@ def test_deterministic_json_csv_svg_and_png_exports(tmp_path: Path) -> None:
             response = client.get(job["downloadUrl"])
             assert response.status_code == 200
             downloads.setdefault(export_format, []).append(response.content)
+            if previous_export_id is not None:
+                assert client.get(f"/api/export/{previous_export_id}/status").status_code == 404
+                assert len(list(settings.export_dir.iterdir())) == 1
+            previous_export_id = started.json()["exportId"]
 
     payload = json.loads(downloads["JSON"][0])
     assert payload["analysis"]["config"]["minimumConfidence"] == 0

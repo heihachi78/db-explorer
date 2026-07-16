@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import {
   ApiError,
@@ -108,7 +108,13 @@ function HierarchyBranch({
   );
 }
 
-export function AnalysisPanel({ operationActive = false }: { operationActive?: boolean }) {
+export function AnalysisPanel({
+  operationActive = false,
+  sourceRevision = 0,
+}: {
+  operationActive?: boolean;
+  sourceRevision?: number;
+}) {
   const [runs, setRuns] = useState<AnalysisRun[]>([]);
   const [selectedRun, setSelectedRun] = useState<AnalysisRun | null>(null);
   const [communities, setCommunities] = useState<CommunityMetrics[]>([]);
@@ -139,6 +145,7 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
   const [estimatePending, setEstimatePending] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loadedAnalysisIdRef = useRef<string | null>(null);
 
   async function refresh() {
     try {
@@ -152,13 +159,24 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
     }
   }
 
+  const analysisPollingActive = runs.some((run) => ACTIVE_ANALYSIS_STATES.has(run.status));
+
   useEffect(() => {
+    if (sourceRevision > 0) {
+      loadedAnalysisIdRef.current = null;
+      setSelectedRun(null); setCommunities([]); setCommunityGraph(null); setCommunityDetail(null);
+      setHierarchy(null); setHierarchyDetail(null); setComparison(null); setComparisonIds([]);
+    }
+    void refresh();
+  }, [sourceRevision]);
+
+  useEffect(() => {
+    if (!analysisPollingActive) return;
     let disposed = false;
     async function poll() { if (!disposed) await refresh(); }
-    void poll();
-    const timer = setInterval(poll, 2000);
+    const timer = setInterval(() => { void poll(); }, 2000);
     return () => { disposed = true; clearInterval(timer); };
-  }, []);
+  }, [analysisPollingActive]);
 
   function analysisPayload() {
     return {
@@ -257,8 +275,10 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
   async function inspect(run: AnalysisRun) {
     setSelectedRun(run); setCommunityDetail(null); setHierarchyDetail(null); setExportJob(null); setError(null);
     if (run.status !== "SUCCEEDED") {
+      loadedAnalysisIdRef.current = null;
       setCommunities([]); setCommunityGraph(null); setHierarchy(null); return;
     }
+    loadedAnalysisIdRef.current = run.id;
     setBusy(true);
     try {
       const [nextCommunities, nextGraph, nextHierarchy] = await Promise.all([
@@ -267,22 +287,31 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
       ]);
       setCommunities(nextCommunities); setCommunityGraph(nextGraph); setHierarchy(nextHierarchy);
     } catch (reason) {
+      if (loadedAnalysisIdRef.current === run.id) loadedAnalysisIdRef.current = null;
       setError(reason instanceof ApiError ? reason.message : "A közösségek nem tölthetők be.");
     } finally { setBusy(false); }
   }
 
+  useEffect(() => {
+    if (selectedRun?.status === "SUCCEEDED" && loadedAnalysisIdRef.current !== selectedRun.id) {
+      void inspect(selectedRun);
+    }
+  }, [selectedRun?.id, selectedRun?.status]);
+
+  const selectedRunId = selectedRun?.id;
+
   const selectCommunity = useCallback(async (communityId: number) => {
-    if (!selectedRun) return;
+    if (!selectedRunId) return;
     setBusy(true); setError(null);
     try {
-      const detail = await api.community(selectedRun.id, communityId);
+      const detail = await api.community(selectedRunId, communityId);
       setCommunityDetail(detail);
       setAnnotationName(detail.annotation?.name ?? detail.metrics.suggestedName);
       setAnnotationNote(detail.annotation?.note ?? "");
     } catch (reason) {
       setError(reason instanceof ApiError ? reason.message : "A közösség nem tölthető be.");
     } finally { setBusy(false); }
-  }, [selectedRun]);
+  }, [selectedRunId]);
 
   const selectHierarchyNode = useCallback(async (hierarchyId: string) => {
     if (!selectedRun) return;
@@ -356,7 +385,7 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
     } catch (reason) { setError(reason instanceof ApiError ? reason.message : "Az elemzés nem törölhető."); }
   }
 
-  const anyActive = runs.some((run) => ACTIVE_ANALYSIS_STATES.has(run.status));
+  const anyActive = analysisPollingActive;
   const schemas = useMemo(() => Array.from(new Set(
     communities.flatMap((community) => Object.keys(community.schemaDistribution)),
   )).sort(), [communities]);
@@ -369,14 +398,15 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
         <div><p className="overline">Közösségelemzés</p><h3>Leiden futások és elemzői nézetek</h3></div>
         <span className="analysis-run-count">{runs.length} mentett futás</span>
       </div>
+      {error && <div className="error-banner" role="alert"><strong>Elemzési hiba</strong><span>{error}</span></div>}
 
       <div className="analysis-layout">
-        <form className="analysis-form" onSubmit={start}>
+        <form className="analysis-form" onSubmit={start} noValidate>
           <h4>Új futás</h4>
           <label>Név<input value={name} onChange={(event) => setName(event.target.value)} required /></label>
           <div className="analysis-form-row">
             <label>Objective<select value={objective} onChange={(event) => setObjective(event.target.value as typeof objective)}><option>CPM</option><option>MODULARITY</option></select></label>
-            <label>Resolution<input type="number" min="0.01" max="100" step="0.1" value={resolution} onChange={(event) => setResolution(Number(event.target.value))} /></label>
+            <label>Resolution<input type="number" min="0.01" max="100" step="0.01" value={resolution} onChange={(event) => setResolution(Number(event.target.value))} /></label>
           </div>
           <div className="analysis-form-row">
             <label>Seed<input type="number" value={seed} onChange={(event) => setSeed(Number(event.target.value))} /></label>
@@ -394,7 +424,7 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
                     aria-label={`${EDGE_WEIGHT_LABELS[relationshipType]} súlya`}
                     type="number"
                     min="0.01"
-                    step="0.1"
+                    step="0.01"
                     value={edgeWeights[relationshipType]}
                     onChange={(event) => setEdgeWeights((current) => ({
                       ...current,
@@ -418,8 +448,8 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
             <summary>Kísérleti hierarchia beállításai</summary>
             <p>Az alacsony alap-resolution nagy csoportokat keres, majd csak a méretküszöb feletti közösségeket bontja tovább.</p>
             <div className="analysis-form-row">
-              <label>Alap resolution<input aria-label="Hierarchia alap resolution" type="number" min="0.01" max="100" step="0.05" value={hierarchyBaseResolution} onChange={(event) => setHierarchyBaseResolution(Number(event.target.value))} /></label>
-              <label>Gyermek resolution<input aria-label="Hierarchia gyermek resolution" type="number" min="0.01" max="100" step="0.1" value={hierarchyChildResolution} onChange={(event) => setHierarchyChildResolution(Number(event.target.value))} /></label>
+              <label>Alap resolution<input aria-label="Hierarchia alap resolution" type="number" min="0.01" max="100" step="0.01" value={hierarchyBaseResolution} onChange={(event) => setHierarchyBaseResolution(Number(event.target.value))} /></label>
+              <label>Gyermek resolution<input aria-label="Hierarchia gyermek resolution" type="number" min="0.01" max="100" step="0.01" value={hierarchyChildResolution} onChange={(event) => setHierarchyChildResolution(Number(event.target.value))} /></label>
             </div>
             <div className="analysis-form-row">
               <label>Minimum méret<input aria-label="Hierarchia minimum méret" type="number" min="2" max="100000" value={hierarchyMinimumSize} onChange={(event) => setHierarchyMinimumSize(Number(event.target.value))} /></label>
@@ -427,12 +457,12 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
             </div>
             <label>Maximum közösség<input aria-label="Hierarchia maximum közösség" type="number" min="2" max="100000" value={hierarchyMaxCommunities} onChange={(event) => setHierarchyMaxCommunities(Number(event.target.value))} /></label>
             <label>Szülőnkénti felülírás<input aria-label="Hierarchia resolution felülírások" value={hierarchyOverrides} onChange={(event) => setHierarchyOverrides(event.target.value)} placeholder="0=1.5, 0.2=2.0" /></label>
-            <button className="secondary-button analysis-profile-button" type="button" onClick={() => void startHierarchy()} disabled={busy || anyActive || operationActive || estimatePending || estimate?.withinLimits === false}>Kísérleti hierarchia indítása</button>
+            <button className="secondary-button analysis-profile-button" type="button" onClick={() => void startHierarchy()} disabled={busy || anyActive || operationActive || estimate?.withinLimits === false}>Kísérleti hierarchia indítása</button>
           </details>
           <p className="parameter-hint">Az alapsúlyokat confidence és a választott hub policy korrigálja. Az alapértelmezett profil a logikai objektumokra optimalizált.</p>
-          <button className="primary-button" disabled={busy || anyActive || operationActive || estimatePending || estimate?.withinLimits === false}>Elemzés indítása</button>
-          <button className="secondary-button analysis-profile-button" type="button" onClick={() => void startProfile("resolution")} disabled={busy || anyActive || operationActive || estimatePending || estimate?.withinLimits === false}>6 pontos resolution profil</button>
-          <button className="secondary-button analysis-profile-button" type="button" onClick={() => void startProfile("seed")} disabled={busy || anyActive || operationActive || estimatePending || estimate?.withinLimits === false}>5 seed stabilitásprofil</button>
+          <button className="primary-button" type="submit" disabled={busy || anyActive || operationActive || estimate?.withinLimits === false}>Elemzés indítása</button>
+          <button className="secondary-button analysis-profile-button" type="button" onClick={() => void startProfile("resolution")} disabled={busy || anyActive || operationActive || estimate?.withinLimits === false}>6 pontos resolution profil</button>
+          <button className="secondary-button analysis-profile-button" type="button" onClick={() => void startProfile("seed")} disabled={busy || anyActive || operationActive || estimate?.withinLimits === false}>5 seed stabilitásprofil</button>
         </form>
 
         <div className="analysis-runs">
@@ -572,7 +602,6 @@ export function AnalysisPanel({ operationActive = false }: { operationActive?: b
           )}
         </section>
       )}
-      {error && <div className="error-banner" role="alert"><strong>Elemzési hiba</strong><span>{error}</span></div>}
     </section>
   );
 }

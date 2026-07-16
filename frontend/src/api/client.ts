@@ -56,6 +56,7 @@ export interface GraphNode {
   isExternal: boolean;
   metadata: Record<string, unknown>;
   depth?: number;
+  componentId?: string;
 }
 
 export interface GraphEvidence {
@@ -95,6 +96,42 @@ export interface SubgraphResult {
   edges: GraphEdge[];
   truncated: boolean;
   suggestion: string | null;
+}
+
+export interface GraphComponent {
+  id: string;
+  nodeCount: number;
+  edgeCount: number;
+  topology: "ISOLATED" | "TREE" | "CYCLIC";
+  density: number;
+  externalNodeCount: number;
+  invalidNodeCount: number;
+  owners: Record<string, number>;
+  objectTypes: Record<string, number>;
+  relationshipTypes: Record<string, number>;
+  sampleObjects: Array<{ id: string; label: string }>;
+}
+
+export interface GraphOverview {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  components: GraphComponent[];
+  summary: {
+    sourceNodeCount: number;
+    sourceEdgeCount: number;
+    nodeCount: number;
+    edgeCount: number;
+    componentCount: number;
+    isolatedNodeCount: number;
+    treeComponentCount: number;
+    cyclicComponentCount: number;
+  };
+  facets: {
+    owners: Record<string, number>;
+    objectTypes: Record<string, number>;
+    statuses: Record<string, number>;
+    relationshipTypes: Record<string, number>;
+  };
 }
 
 export interface PathResult {
@@ -360,6 +397,17 @@ export const api = {
     minimumConfidence?: number;
     includeExternal?: boolean;
   }) => request<SubgraphResult>("/subgraph", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }),
+  graphOverview: (payload: {
+    owners?: string[];
+    objectTypes?: string[];
+    statuses?: string[];
+    relationshipTypes?: string[];
+    minimumConfidence?: number;
+    includeExternal?: boolean;
+  }) => request<GraphOverview>("/graph-overview", {
     method: "POST",
     body: JSON.stringify(payload),
   }),

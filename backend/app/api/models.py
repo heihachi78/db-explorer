@@ -52,6 +52,29 @@ class SubgraphRequest(BaseModel):
         return list(dict.fromkeys(value.strip() for value in values if value.strip()))
 
 
+class GraphOverviewRequest(BaseModel):
+    query: str | None = Field(default=None, max_length=200)
+    owners: list[str] = Field(default_factory=list)
+    objectTypes: list[str] = Field(default_factory=list)
+    statuses: list[str] = Field(default_factory=list)
+    relationshipTypes: list[str] = Field(default_factory=list)
+    minimumConfidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    includeExternal: bool = True
+
+    @field_validator("owners", "objectTypes", "statuses", "relationshipTypes")
+    @classmethod
+    def unique_overview_filters(cls, values: list[str]) -> list[str]:
+        return list(dict.fromkeys(value.strip() for value in values if value.strip()))
+
+    @field_validator("query")
+    @classmethod
+    def clean_overview_query(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+
 class ImpactRequest(BaseModel):
     objectId: str = Field(min_length=1)
     mode: Literal["DEPENDENTS", "DEPENDENCIES"] = "DEPENDENTS"
