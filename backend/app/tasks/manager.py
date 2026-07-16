@@ -36,6 +36,11 @@ class TaskManager:
     def persist_initial_state(self) -> None:
         self.repository.save(self._snapshot)
 
+    def reset(self) -> None:
+        self._snapshot = TaskSnapshot()
+        self._task = None
+        self.repository.save(self._snapshot)
+
     async def start(
         self,
         operation: TaskOperation,

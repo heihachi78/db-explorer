@@ -7,6 +7,7 @@ import {
   type PublicConfig,
   type ScanStatus,
   type ScanSummary,
+  type NamedSubgraph,
 } from "./api/client";
 import { StatusPill } from "./components/StatusPill";
 
@@ -39,6 +40,7 @@ function App() {
   const [scanStatus, setScanStatus] = useState<ScanStatus | null>(null);
   const [scanSummary, setScanSummary] = useState<ScanSummary | null>(null);
   const [scanRevision, setScanRevision] = useState(0);
+  const [activeSubgraph, setActiveSubgraph] = useState<NamedSubgraph | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -148,6 +150,23 @@ function App() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function resetWorkspace() {
+    if (!window.confirm("Minden kinyert metaadat, részgráf, elemzés, megjegyzés és export törlődik. Folytatod?")) return;
+    setLoading(true); setError(null);
+    try {
+      await api.resetWorkspace();
+      setCapabilities(null);
+      setSelectedSchemas([]); setSelectedObjectTypes([]);
+      setScanSummary(null); setScanStatus(null); setActiveSubgraph(null);
+      setScanRevision((current) => current + 1);
+      setConfig((current) => current ? {
+        ...current, datasetId: null, resetRequired: false, activeOperation: false,
+      } : current);
+    } catch (reason) {
+      setError(reason instanceof ApiError ? reason.message : "A munkaterület nem törölhető.");
+    } finally { setLoading(false); }
   }
 
   async function cancelScan() {
@@ -302,10 +321,12 @@ function App() {
             <button
               className="primary-button"
               onClick={startScan}
-              disabled={selectedSchemas.length === 0 || scanActive || analysisActive || exportActive || loading}
+              disabled={selectedSchemas.length === 0 || Boolean(scanSummary) || scanActive || analysisActive || exportActive || loading}
             >Adatgyűjtés indítása</button>
+            <button className="danger-button" type="button" onClick={() => void resetWorkspace()} disabled={scanActive || analysisActive || exportActive || loading}>Új felmérés · minden adat törlése</button>
             {scanActive && <button className="secondary-button" onClick={cancelScan}>Megszakítás</button>}
           </div>
+          {scanSummary && <p className="operation-note">Új metaadatgyűjtés előtt indíts új felmérést. Ez megakadályozza a korábbi és az új adathalmaz keveredését.</p>}
           {scanStatus && (scanActive || scanSucceeded) && (
             <div className="scan-progress" aria-live="polite">
               {!scanSucceeded && (
@@ -345,10 +366,23 @@ function App() {
           )}
         </section>
         <Suspense fallback={<div className="explorer-loading">Gráfböngésző betöltése…</div>}>
-          <GraphExplorer dataVersion={lastOperationWasExport || lastOperationWasAnalysis ? null : scanStatus?.finished_at} />
+          <GraphExplorer
+            key={`graph-${scanRevision}`}
+            dataVersion={scanSummary
+              ? (scanSummary.datasetId ?? "published-dataset")
+              : (lastOperationWasExport || lastOperationWasAnalysis ? null : scanStatus?.finished_at)}
+            activeSubgraph={activeSubgraph}
+            onSelectSubgraph={setActiveSubgraph}
+          />
         </Suspense>
         <Suspense fallback={<div className="explorer-loading">Elemzőfelület betöltése…</div>}>
-          <AnalysisPanel operationActive={scanActive || analysisActive || exportActive} sourceRevision={scanRevision} />
+          <AnalysisPanel
+            key={`analysis-${scanRevision}`}
+            operationActive={scanActive || analysisActive || exportActive}
+            sourceRevision={scanRevision}
+            activeSubgraph={activeSubgraph}
+            onSubgraphCreated={setActiveSubgraph}
+          />
         </Suspense>
       </main>
     </div>

@@ -73,15 +73,15 @@ Az alkalmazás helyben, Docker Compose segítségével fut. Nincs belépés, fel
 4. Kiválasztja a felmérendő sémákat és az opcionális objektumtípus-szűrést.
 5. Elindítja az adatgyűjtést, és fázisonként látja az előrehaladást.
 6. Sikeres gyűjtés után áttekinti az objektum- és kapcsolatszámokat, illetve az esetleges lefedettségi figyelmeztetéseket.
-7. Objektumokra keres, részgráfokat nyit és kapcsolatokat vizsgál.
-8. Lefuttatja az alapértelmezett Leiden-elemzést.
-9. Több resolution-, súly- és hubkezelési beállítást próbál ki.
-10. Összehasonlítja a közösségek számát, méretét, conductance-ét, stabilitását és értelmezhetőségét.
-11. Megvizsgálja a közösségek központi és kifelé kapcsoló objektumait.
-12. Szükség szerint helyi nevet vagy megjegyzést rendel a közösségekhez.
-13. Hatás- és útvonalelemzéseket futtat.
+7. A természetes gráftérképen minimum komponensméret, név, séma, objektumtípus és topológia szerint szűr, majd kijelöli a releváns összefüggő komponenseket.
+8. A kijelölt komponenseket elnevezi és perzisztált részgráfként menti; a további műveletek kizárólag az aktív részgráfra vonatkoznak.
+9. Az aktív részgráfon lefuttatja az alapértelmezett Leiden-elemzést, vagy resolution-, súly-, seed- és hubkezelési beállításokat módosít.
+10. A futáslistában ellenőrzi a korábbi futások teljes paraméterkészletét, majd összehasonlítja a közösségek számát, méretét, conductance-ét, stabilitását és értelmezhetőségét.
+11. Egy közösség kereshető objektumlistájában és kizárólag annak node-jait tartalmazó belső gráfjában ellenőrzi a sémákat, objektumokat és kapcsolatokat.
+12. Szükség szerint helyi nevet vagy megjegyzést rendel a közösséghez.
+13. A tovább bontandó közösséget elnevezett gyermek-részgráfként menti, aktiválja, és azon újabb közösségelemzést indít. A lépés rekurzívan ismételhető.
 14. Exportálja a kiválasztott eredményeket.
-15. Ha az Oracle-adatbázis megváltozik, kézzel újraindítja a teljes gyűjtést; a sikeres új futás lecseréli a korábbi adathalmazt.
+15. Új metaadatgyűjtés előtt egyetlen explicit reset művelettel törli a korábbi metaadatokat, részgráfokat, elemzéseket, annotációkat és exportokat; a felület ezután alapállapotba kerül.
 
 ## 4. Architektúra
 
@@ -89,7 +89,7 @@ Az alkalmazás helyben, Docker Compose segítségével fut. Nincs belépés, fel
 ┌───────────────────────────────────────────────────────────────┐
 │ Böngésző                                                      │
 │ React + TypeScript + Cytoscape.js                             │
-│ keresés | gráf | közösségek | útvonal | hatás | export       │
+│ komponensek | részgráfok | közösségek | részletek | export   │
 └───────────────────────────┬───────────────────────────────────┘
                             │ HTTP / REST + állapot-polling
 ┌───────────────────────────▼───────────────────────────────────┐
@@ -157,6 +157,8 @@ helyi Compose-ban indított példány.
 | `objects` | az aktuális felmérés normalizált Oracle-objektumai |
 | `relationships` | nyers, irányított és típusos kapcsolatok |
 | `relationship_evidence` | a kapcsolat forrása és bizonyítéka |
+| `named_subgraphs` | elnevezett részgráfok eredete és szülő–gyermek kapcsolata |
+| `named_subgraph_membership` | részgráf és objektum megfeleltetés |
 | `analysis_runs` | az aktuális adathalmazon futtatott elemzések konfigurációi |
 | `analysis_membership` | objektum és közösség megfeleltetés |
 | `community_metrics` | közösségenként számított mutatók |
@@ -963,8 +965,8 @@ Nem szükséges külön route- és képernyőrendszer minden funkcióhoz. Egyetl
 áttekinthető oldalon négy munkaterület elegendő:
 
 1. **Kapcsolat és adatgyűjtés:** connection test, sémaválasztás, scan progress és összesítő.
-2. **Gráfböngésző:** keresés, részgráf, objektum- és kapcsolatrészlet, hatás és útvonal.
-3. **Közösségelemzés:** paraméterezés, futások, mutatók, community map és drill-down.
+2. **Természetes gráf:** összefüggő komponensek egyszerű szűrése, többes kijelölése, megjelenítése és elnevezett részgráfként mentése.
+3. **Közösségelemzés:** az aktív részgráf paraméterezése, futásai és teljes konfigurációja, mutatók, kereshető közösségi objektumlista, belső gráf és rekurzív részgráfképzés.
 4. **Export:** aktuális nézet vagy teljes elemzési eredmény.
 
 ### 19.2. Gráfinterakciók

@@ -3,6 +3,53 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import App from "./App";
 
+vi.mock("./components/GraphCanvas", () => ({
+  GraphCanvas: () => <div data-testid="graph-canvas" />,
+}));
+
+const WORKFLOW_SCOPE = {
+  id: "scope-1", name: "Sales scope", parentId: null, sourceKind: "COMPONENTS",
+  sourceAnalysisId: null, sourceCommunityId: null, nodeCount: 3, edgeCount: 2,
+  createdAt: "2026-07-16T08:00:00Z",
+};
+const WORKFLOW_NODE = {
+  id: "db::pdb::SALES::TABLE::ORDERS", owner: "SALES", name: "ORDERS",
+  objectType: "TABLE", oracleObjectType: "TABLE", status: "VALID",
+  isExternal: false, metadata: {}, componentId: "component-1", stability: null,
+  centrality: { PAGERANK: 0.25, INTERNAL_STRENGTH: 2, EXTERNAL_STRENGTH: 0 },
+};
+const WORKFLOW_GRAPH = {
+  nodes: [WORKFLOW_NODE], edges: [], truncated: false, suggestion: null,
+};
+const WORKFLOW_OVERVIEW = {
+  nodes: [WORKFLOW_NODE], edges: [],
+  components: [{
+    id: "component-1", nodeCount: 3, edgeCount: 2, topology: "TREE",
+    density: 0.67, externalNodeCount: 0, invalidNodeCount: 0,
+    owners: { SALES: 3 }, objectTypes: { TABLE: 3 }, relationshipTypes: { DEPENDS_ON: 2 },
+    sampleObjects: [{ id: WORKFLOW_NODE.id, label: "SALES.ORDERS" }],
+  }],
+  summary: {
+    sourceNodeCount: 3, sourceEdgeCount: 2, nodeCount: 3, edgeCount: 2,
+    componentCount: 1, isolatedNodeCount: 0, treeComponentCount: 1, cyclicComponentCount: 0,
+  },
+  facets: { owners: { SALES: 3 }, objectTypes: { TABLE: 3 }, statuses: { VALID: 3 }, relationshipTypes: { DEPENDS_ON: 2 } },
+};
+const WORKFLOW_SCAN_SUMMARY = {
+  available: true,
+  summary: {
+    datasetId: "dataset-1", databaseName: "TESTDB", containerName: "TESTPDB",
+    selectedSchemas: ["SALES"], ownerCounts: { SALES: 3 }, objectTypeCounts: { TABLE: 3 },
+    relationshipTypeCounts: { DEPENDS_ON: 2 }, externalObjectCount: 0,
+    unresolvedSynonymCount: 0, warnings: [],
+  },
+};
+
+async function activateWorkflowScope() {
+  fireEvent.click(await screen.findByText(WORKFLOW_SCOPE.name));
+  await screen.findByText(`Aktív: ${WORKFLOW_SCOPE.name}`);
+}
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -11,7 +58,9 @@ afterEach(() => {
 test("shows the configured Oracle connection", async () => {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input);
-    const body = url.endsWith("/scan/status") ? {
+    const body = url.endsWith("/graph-overview") ? { ...WORKFLOW_OVERVIEW, nodes: [], edges: [], components: [] }
+      : url.endsWith("/subgraphs") ? { items: [] }
+        : url.endsWith("/scan/status") ? {
       state: "IDLE",
       phase: null,
       progress_current: 0,
@@ -58,7 +107,9 @@ test("shows the configured Oracle connection", async () => {
 test("shows a static completed progress bar without stale phase labels", async () => {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input);
-    const body = url.endsWith("/scan/status") ? {
+    const body = url.endsWith("/graph-overview") ? { ...WORKFLOW_OVERVIEW, nodes: [], edges: [], components: [] }
+      : url.endsWith("/subgraphs") ? { items: [] }
+        : url.endsWith("/scan/status") ? {
       state: "SUCCEEDED",
       phase: "PUBLISHING",
       progress_current: 0,
@@ -102,6 +153,39 @@ test("shows a static completed progress bar without stale phase labels", async (
   expect(progress).toHaveAttribute("max", "1");
   expect(screen.queryByText("PUBLISHING")).not.toBeInTheDocument();
   expect(screen.queryByText("Operation completed.")).not.toBeInTheDocument();
+});
+
+test("resets the complete workspace and returns the interface to its initial state", async () => {
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = String(input);
+    const body = url.endsWith("/workspace/reset") && init?.method === "POST"
+      ? { reset: true, resetAt: "2026-07-16T08:00:00Z", datasetId: null }
+      : url.endsWith("/graph-overview") ? WORKFLOW_OVERVIEW
+        : url.endsWith("/subgraphs") ? { items: [] }
+          : url.endsWith("/analyses") ? { items: [] }
+            : url.endsWith("/scan/status") ? {
+              state: "IDLE", phase: null, progress_current: 0, progress_total: null,
+              message: null, error_code: null, error_message: null, counters: {},
+              started_at: null, finished_at: null,
+            } : url.endsWith("/scan/summary") ? WORKFLOW_SCAN_SUMMARY : {
+              oracleConfigured: true, oracleMode: "thin", dataFilePresent: true,
+              activeOperation: false, datasetId: "dataset-1", resetRequired: true, limits: {},
+            };
+    return new Response(JSON.stringify(body), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    });
+  });
+
+  render(<App />);
+  expect(await screen.findByText("Lefedettségi részletek")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Új felmérés · minden adat törlése" }));
+
+  await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith(
+    "/api/workspace/reset", expect.objectContaining({ method: "POST" }),
+  ));
+  expect(screen.queryByText("Lefedettségi részletek")).not.toBeInTheDocument();
+  expect(screen.getByText("Előbb válassz részgráfot")).toBeInTheDocument();
 });
 
 test("starts a scan with the selected schemas and optional object types", async () => {
@@ -173,32 +257,21 @@ test("does not present a completed export as a successful scan", async () => {
   expect(screen.queryByRole("progressbar", { name: "Adatgyűjtés befejezve" })).not.toBeInTheDocument();
 });
 
-test("searches graph objects without loading the full graph", async () => {
+test("selects a natural component and saves it as the active named subgraph", async () => {
+  let created = false;
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
-    const body = url.endsWith("/subgraph") ? {
-      rootObjectIds: ["db::pdb::SALES::TABLE::ORDERS"], nodes: [], edges: [],
-      truncated: false, suggestion: null,
-    } : url.includes("/objects?") ? {
-      items: [{
-        id: "db::pdb::SALES::TABLE::ORDERS",
-        owner: "SALES",
-        name: "ORDERS",
-        objectType: "TABLE",
-        oracleObjectType: "TABLE",
-        status: "VALID",
-        isExternal: false,
-        metadata: {},
-      }],
-      total: 1,
-      page: 1,
-      pageSize: 30,
-      facets: { owners: { SALES: 1 }, objectTypes: { TABLE: 1 }, statuses: { VALID: 1 } },
-    } : url.endsWith("/scan/status") ? {
+    const method = init?.method ?? "GET";
+    const body = url.endsWith("/graph-overview") ? WORKFLOW_OVERVIEW
+      : url.endsWith("/subgraphs") && method === "POST" ? (created = true, WORKFLOW_SCOPE)
+        : url.endsWith("/subgraphs") ? { items: created ? [WORKFLOW_SCOPE] : [] }
+          : url.endsWith(`/subgraphs/${WORKFLOW_SCOPE.id}/graph`) ? WORKFLOW_GRAPH
+            : url.endsWith("/analyses") ? { items: [] }
+              : url.endsWith("/scan/status") ? {
       state: "IDLE", phase: null, progress_current: 0, progress_total: null,
       message: null, error_code: null, error_message: null, counters: {},
       started_at: null, finished_at: null,
-    } : url.endsWith("/scan/summary") ? { available: false, summary: null } : {
+    } : url.endsWith("/scan/summary") ? WORKFLOW_SCAN_SUMMARY : {
       oracleConfigured: true,
       oracleMode: "thin",
       dataFilePresent: true,
@@ -212,31 +285,21 @@ test("searches graph objects without loading the full graph", async () => {
   });
 
   render(<App />);
-  fireEvent.change(await screen.findByPlaceholderText("például ORDER*"), { target: { value: "ORDER*" } });
-  fireEvent.click(await screen.findByRole("button", { name: "Keresés" }));
+  const componentMeta = await screen.findByText("Fa · SALES");
+  const componentCard = componentMeta.closest("article");
+  expect(componentCard).not.toBeNull();
+  fireEvent.click(within(componentCard as HTMLElement).getByRole("checkbox"));
+  fireEvent.change(screen.getByLabelText("Új részgráf neve"), { target: { value: WORKFLOW_SCOPE.name } });
+  fireEvent.click(screen.getByRole("button", { name: "Mentés részgráfként" }));
 
-  expect(await screen.findByText("SALES.ORDERS")).toBeInTheDocument();
-  expect(screen.getByText("TABLE")).toBeInTheDocument();
-  expect(globalThis.fetch).toHaveBeenCalledWith(
-    expect.stringContaining("/api/objects?q=ORDER*&pageSize=30"),
-    expect.any(Object),
-  );
-
-  fireEvent.change(screen.getByLabelText("Kapcsolattípusok"), { target: { value: "depends_on, foreign_key" } });
-  fireEvent.change(screen.getByLabelText("Minimum confidence"), { target: { value: "0.8" } });
-  fireEvent.click(screen.getByLabelText("Külső objektumok"));
-  fireEvent.click(screen.getByRole("button", { name: "Gráf" }));
   await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith(
-    "/api/subgraph",
+    "/api/subgraphs",
     expect.objectContaining({
       method: "POST",
-      body: JSON.stringify({
-        rootObjectIds: ["db::pdb::SALES::TABLE::ORDERS"], depth: 1, direction: "BOTH",
-        relationshipTypes: ["DEPENDS_ON", "FOREIGN_KEY"], minimumConfidence: 0.8,
-        includeExternal: false,
-      }),
+      body: JSON.stringify({ name: WORKFLOW_SCOPE.name, objectIds: [WORKFLOW_NODE.id] }),
     }),
   ));
+  expect((await screen.findAllByText(WORKFLOW_SCOPE.name)).length).toBeGreaterThan(0);
 });
 
 test("shows the complete graph component map after a published scan", async () => {
@@ -307,6 +370,13 @@ test("shows persisted analysis metrics and starts a resolution profile", async (
         stability: "NOT_ASSESSED",
         warnings: [],
       }] };
+    } else if (url.includes("/analyses/run-1/communities/0/objects")) {
+      body = {
+        items: [WORKFLOW_NODE], total: 1, page: 1, pageSize: 100,
+        facets: { owners: { SALES: 1 }, objectTypes: { TABLE: 1 } },
+      };
+    } else if (url.endsWith("/analyses/run-1/communities/0/subgraph")) {
+      body = WORKFLOW_GRAPH;
     } else if (url.endsWith("/analyses/run-1/communities/0")) {
       body = {
         metrics: {
@@ -377,7 +447,7 @@ test("shows persisted analysis metrics and starts a resolution profile", async (
         name: "Domain analysis",
         status: "SUCCEEDED",
         algorithm: "LEIDEN",
-        config: { resolution: 1 },
+        config: { resolution: 1, subgraphId: WORKFLOW_SCOPE.id },
         summary: {
           algorithm: "LEIDEN", objective: "CPM", resolution: 1, quality: 12,
           communityCount: 2, communitySizes: [3, 3], singletonCount: 0,
@@ -392,7 +462,7 @@ test("shows persisted analysis metrics and starts a resolution profile", async (
         finishedAt: "2026-07-15T00:00:01Z",
       }, {
         id: "run-2", name: "Fine analysis", status: "SUCCEEDED", algorithm: "LEIDEN",
-        config: { resolution: 2 }, summary: {
+        config: { resolution: 2, subgraphId: WORKFLOW_SCOPE.id }, summary: {
           algorithm: "LEIDEN", objective: "CPM", resolution: 2, quality: 10,
           communityCount: 3, communitySizes: [2, 2, 2], singletonCount: 0,
           smallCommunityCount: 3, isolatedNodeCount: 0, sharedInfrastructureCount: 0,
@@ -401,6 +471,12 @@ test("shows persisted analysis metrics and starts a resolution profile", async (
         }, errorMessage: null, createdAt: "2026-07-15T00:00:02Z",
         startedAt: "2026-07-15T00:00:02Z", finishedAt: "2026-07-15T00:00:03Z",
       }] };
+    } else if (url.endsWith(`/subgraphs/${WORKFLOW_SCOPE.id}/graph`)) {
+      body = WORKFLOW_GRAPH;
+    } else if (url.endsWith("/subgraphs")) {
+      body = { items: [WORKFLOW_SCOPE] };
+    } else if (url.endsWith("/graph-overview")) {
+      body = WORKFLOW_OVERVIEW;
     } else if (url.endsWith("/scan/status")) {
       body = {
         state: "IDLE", phase: null, progress_current: 0, progress_total: null,
@@ -408,7 +484,7 @@ test("shows persisted analysis metrics and starts a resolution profile", async (
         started_at: null, finished_at: null,
       };
     } else if (url.endsWith("/scan/summary")) {
-      body = { available: false, summary: null };
+      body = WORKFLOW_SCAN_SUMMARY;
     } else {
       body = {
         oracleConfigured: true, oracleMode: "thin", dataFilePresent: true,
@@ -422,6 +498,7 @@ test("shows persisted analysis metrics and starts a resolution profile", async (
   });
 
   render(<App />);
+  await activateWorkflowScope();
   expect(await screen.findByText("6 node · 7 kapcsolat")).toBeInTheDocument();
   fireEvent.click(screen.getByText("Kapcsolattípus-súlyok"));
   fireEvent.change(screen.getByLabelText("Idegen kulcs súlya"), { target: { value: "7" } });
@@ -433,10 +510,27 @@ test("shows persisted analysis metrics and starts a resolution profile", async (
   expect(await screen.findByText("SALES / ORDER")).toBeInTheDocument();
   expect(screen.getByText("90.0%")).toBeInTheDocument();
 
-  fireEvent.click(screen.getAllByRole("button", { name: /SALES \/ ORDER/ })[0]);
+  expect(screen.queryByText("Legjobb elválasztás")).not.toBeInTheDocument();
+  expect(screen.queryByText("Leggyengébb elválasztás")).not.toBeInTheDocument();
+  const resultPanel = screen.getByText("Eredmény").closest(".analysis-results");
+  expect(resultPanel).not.toBeNull();
+  expect(within(resultPanel as HTMLElement).getByLabelText("Aggregált közösségi gráf")).toBeInTheDocument();
+  expect(within(resultPanel as HTMLElement).queryByRole("table", { name: "Közösségek" })).not.toBeInTheDocument();
+  expect(screen.queryByText("Miért került ide?")).not.toBeInTheDocument();
+  const workbench = screen.getByText("Részletes közösséglista").closest(".community-workbench");
+  expect(workbench).not.toBeNull();
+  const communityTable = within(workbench as HTMLElement).getByRole("table", { name: "Közösségek" });
+  const communityRow = within(communityTable).getByRole("row", { name: /SALES \/ ORDER/ });
+  fireEvent.click(communityRow);
   const detail = await screen.findByText("Miért került ide?");
   const detailCard = detail.closest(".community-detail-card");
   expect(detailCard).not.toBeNull();
+  expect(communityRow).toHaveClass("selected");
+  expect(screen.getByText("Minden kör egy közösség, a vonalak a közösségek közötti összesített objektumkapcsolatok.")).toBeInTheDocument();
+  expect(within(detailCard as HTMLElement).getByText("Objektumok").nextElementSibling).toHaveTextContent("3");
+  expect(within(detailCard as HTMLElement).getByText("Belső/külső élek").nextElementSibling).toHaveTextContent("3 / 1");
+  expect(within(detailCard as HTMLElement).getByLabelText("Séma szerinti bontás")).toHaveTextContent("SALES3 objektum · 100.0%");
+  expect(screen.getByText("1 találat / 3 közösségi tag")).toBeInTheDocument();
   fireEvent.change(within(detailCard as HTMLElement).getByLabelText("Név"), { target: { value: "Sales order" } });
   fireEvent.change(within(detailCard as HTMLElement).getByLabelText("Megjegyzés"), { target: { value: "Verified" } });
   fireEvent.click(within(detailCard as HTMLElement).getByRole("button", { name: "Mentés" }));
@@ -497,11 +591,14 @@ test("starts an analysis even while the background estimate is still loading", a
     const body = url.endsWith("/analyses") && method === "POST"
       ? { accepted: true, analysisId: "analysis-new" }
       : url.endsWith("/analyses") ? { items: [] }
+        : url.endsWith(`/subgraphs/${WORKFLOW_SCOPE.id}/graph`) ? WORKFLOW_GRAPH
+          : url.endsWith("/subgraphs") ? { items: [WORKFLOW_SCOPE] }
+            : url.endsWith("/graph-overview") ? WORKFLOW_OVERVIEW
         : url.endsWith("/scan/status") ? {
           state: "IDLE", phase: null, progress_current: 0, progress_total: null,
           message: null, error_code: null, error_message: null, counters: {},
           started_at: null, finished_at: null,
-        } : url.endsWith("/scan/summary") ? { available: false, summary: null }
+        } : url.endsWith("/scan/summary") ? WORKFLOW_SCAN_SUMMARY
           : { oracleConfigured: true, oracleMode: "thin", dataFilePresent: true, activeOperation: false, limits: {} };
     return new Response(JSON.stringify(body), {
       status: 200,
@@ -510,6 +607,7 @@ test("starts an analysis even while the background estimate is still loading", a
   });
 
   render(<App />);
+  await activateWorkflowScope();
   const startButton = await screen.findByRole("button", { name: "Elemzés indítása" });
   expect(startButton).toBeEnabled();
   const analysisForm = startButton.closest("form") as HTMLFormElement;
@@ -535,16 +633,20 @@ test("starts an experimental hierarchy with recursive parameters", async () => {
       estimatedMemoryBytes: 128000, sizeCategory: "SMALL", withinLimits: true,
       limits: { maxNodes: 500000, maxEdges: 5000000 }, warnings: [], approximate: true,
     } : url.endsWith("/analyses") ? { items: [] }
+      : url.endsWith(`/subgraphs/${WORKFLOW_SCOPE.id}/graph`) ? WORKFLOW_GRAPH
+        : url.endsWith("/subgraphs") ? { items: [WORKFLOW_SCOPE] }
+          : url.endsWith("/graph-overview") ? WORKFLOW_OVERVIEW
       : url.endsWith("/scan/status") ? {
         state: "IDLE", phase: null, progress_current: 0, progress_total: null,
         message: null, error_code: null, error_message: null, counters: {},
         started_at: null, finished_at: null,
-      } : url.endsWith("/scan/summary") ? { available: false, summary: null }
+      } : url.endsWith("/scan/summary") ? WORKFLOW_SCAN_SUMMARY
         : { oracleConfigured: true, oracleMode: "thin", dataFilePresent: true, activeOperation: false, limits: {} };
     return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
   });
 
   render(<App />);
+  await activateWorkflowScope();
   expect(await screen.findByText("100 node · 200 kapcsolat")).toBeInTheDocument();
   fireEvent.click(screen.getByText("Kísérleti hierarchia beállításai"));
   fireEvent.change(screen.getByLabelText("Hierarchia alap resolution"), { target: { value: "0.1" } });
@@ -606,7 +708,7 @@ test("renders and drills into a persisted hierarchy tree", async () => {
       : url.endsWith("/analyses/hierarchy-run/community-graph") ? { nodes: [], edges: [] }
         : url.endsWith("/analyses") ? { items: [{
           id: "hierarchy-run", name: "Hierarchy run", status: "SUCCEEDED", algorithm: "LEIDEN",
-          config: { resolution: 0.2, hierarchyEnabled: true },
+          config: { resolution: 0.2, hierarchyEnabled: true, subgraphId: WORKFLOW_SCOPE.id },
           summary: {
             algorithm: "LEIDEN", objective: "CPM", resolution: 0.2, quality: 1,
             communityCount: 1, communitySizes: [3], singletonCount: 0,
@@ -619,16 +721,20 @@ test("renders and drills into a persisted hierarchy tree", async () => {
           sourceRelationshipCount: 3, estimatedMemoryBytes: 3000, sizeCategory: "SMALL",
           withinLimits: true, limits: { maxNodes: 500000, maxEdges: 5000000 },
           warnings: [], approximate: true,
-        } : url.endsWith("/scan/status") ? {
+        } : url.endsWith(`/subgraphs/${WORKFLOW_SCOPE.id}/graph`) ? WORKFLOW_GRAPH
+          : url.endsWith("/subgraphs") ? { items: [WORKFLOW_SCOPE] }
+            : url.endsWith("/graph-overview") ? WORKFLOW_OVERVIEW
+              : url.endsWith("/scan/status") ? {
           state: "IDLE", phase: null, progress_current: 0, progress_total: null,
           message: null, error_code: null, error_message: null, counters: {},
           started_at: null, finished_at: null,
-        } : url.endsWith("/scan/summary") ? { available: false, summary: null }
+        } : url.endsWith("/scan/summary") ? WORKFLOW_SCAN_SUMMARY
           : { oracleConfigured: true, oracleMode: "thin", dataFilePresent: true, activeOperation: false, limits: {} };
     return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
   });
 
   render(<App />);
+  await activateWorkflowScope();
   fireEvent.click(await screen.findByText("Hierarchy run"));
   expect(await screen.findByText("Hierarchikus közösségtérkép")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: /SALES \/ ORDER/ }));

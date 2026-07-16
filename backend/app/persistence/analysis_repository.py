@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from app.analysis.models import AnalysisConfig, AnalysisResult
-from app.graph.models import GraphNode
+from app.graph.models import GraphEdge, GraphNode
 
 from .database import database
 
@@ -435,6 +435,127 @@ class AnalysisRepository:
                 for row in node_rows
             ],
             "annotation": self.annotation(annotation_row["id"]) if annotation_row else None,
+        }
+
+    def community_objects(
+        self,
+        analysis_id: str,
+        community_id: int,
+        *,
+        query: str | None,
+        owner: str | None,
+        object_type: str | None,
+        page: int,
+        page_size: int,
+    ) -> dict[str, Any] | None:
+        clauses = ["am.analysis_id = ?", "am.community_id = ?"]
+        parameters: list[Any] = [analysis_id, community_id]
+        if query:
+            clauses.append("(o.name LIKE ? COLLATE NOCASE OR o.id LIKE ? COLLATE NOCASE)")
+            pattern = f"%{query}%"
+            parameters.extend((pattern, pattern))
+        if owner:
+            clauses.append("o.owner = ? COLLATE NOCASE")
+            parameters.append(owner)
+        if object_type:
+            clauses.append("o.object_type = ? COLLATE NOCASE")
+            parameters.append(object_type)
+        where = " AND ".join(clauses)
+        with database(self.path, read_only=True) as connection:
+            exists = connection.execute(
+                "SELECT 1 FROM community_metrics WHERE analysis_id = ? AND community_id = ?",
+                (analysis_id, community_id),
+            ).fetchone()
+            if exists is None:
+                return None
+            total = int(connection.execute(
+                f"SELECT COUNT(*) FROM analysis_membership am JOIN objects o ON o.id = am.object_id WHERE {where}",
+                parameters,
+            ).fetchone()[0])
+            rows = connection.execute(
+                f"""
+                SELECT o.*, am.stability,
+                       MAX(CASE WHEN cr.metric = 'PAGERANK' THEN cr.value END) AS pagerank,
+                       MAX(CASE WHEN cr.metric = 'BETWEENNESS' THEN cr.value END) AS betweenness,
+                       MAX(CASE WHEN cr.metric = 'INTERNAL_STRENGTH' THEN cr.value END) AS internal_strength,
+                       MAX(CASE WHEN cr.metric = 'EXTERNAL_STRENGTH' THEN cr.value END) AS external_strength
+                FROM analysis_membership am
+                JOIN objects o ON o.id = am.object_id
+                LEFT JOIN centrality_results cr
+                  ON cr.analysis_id = am.analysis_id AND cr.object_id = am.object_id
+                WHERE {where}
+                GROUP BY o.id
+                ORDER BY o.owner, o.name, o.object_type, o.id
+                LIMIT ? OFFSET ?
+                """,
+                (*parameters, page_size, (page - 1) * page_size),
+            ).fetchall()
+            facet_rows = connection.execute(
+                """
+                SELECT o.owner, o.object_type
+                FROM analysis_membership am JOIN objects o ON o.id = am.object_id
+                WHERE am.analysis_id = ? AND am.community_id = ?
+                """,
+                (analysis_id, community_id),
+            ).fetchall()
+        from collections import Counter
+        return {
+            "items": [GraphNode.from_row(row).to_api() | {
+                "stability": row["stability"],
+                "centrality": {
+                    "PAGERANK": row["pagerank"] or 0.0,
+                    "BETWEENNESS": row["betweenness"] or 0.0,
+                    "INTERNAL_STRENGTH": row["internal_strength"] or 0.0,
+                    "EXTERNAL_STRENGTH": row["external_strength"] or 0.0,
+                },
+            } for row in rows],
+            "total": total,
+            "page": page,
+            "pageSize": page_size,
+            "facets": {
+                "owners": dict(sorted(Counter(row["owner"] for row in facet_rows).items())),
+                "objectTypes": dict(sorted(Counter(row["object_type"] for row in facet_rows).items())),
+            },
+        }
+
+    def community_subgraph(
+        self,
+        analysis_id: str,
+        community_id: int,
+        *,
+        max_nodes: int,
+        max_edges: int,
+    ) -> dict[str, Any] | None:
+        with database(self.path, read_only=True) as connection:
+            ids = [row["object_id"] for row in connection.execute(
+                """
+                SELECT object_id FROM analysis_membership
+                WHERE analysis_id = ? AND community_id = ? ORDER BY object_id
+                """,
+                (analysis_id, community_id),
+            ).fetchall()]
+            if not ids:
+                exists = connection.execute(
+                    "SELECT 1 FROM community_metrics WHERE analysis_id = ? AND community_id = ?",
+                    (analysis_id, community_id),
+                ).fetchone()
+                return {"nodes": [], "edges": [], "truncated": False, "suggestion": None} if exists else None
+            selected = ids[:max_nodes]
+            marks = ",".join("?" for _ in selected)
+            node_rows = connection.execute(
+                f"SELECT * FROM objects WHERE id IN ({marks}) ORDER BY owner, name, object_type, id",
+                selected,
+            ).fetchall()
+            edge_rows = connection.execute(
+                f"SELECT * FROM relationships WHERE source_id IN ({marks}) AND target_id IN ({marks}) ORDER BY id LIMIT ?",
+                (*selected, *selected, max_edges + 1),
+            ).fetchall()
+        truncated = len(ids) > len(selected) or len(edge_rows) > max_edges
+        return {
+            "nodes": [GraphNode.from_row(row).to_api() for row in node_rows],
+            "edges": [GraphEdge.from_row(row).to_api() for row in edge_rows[:max_edges]],
+            "truncated": truncated,
+            "suggestion": "A közösség nagyobb a megjelenítési limitnél; a részletes lista minden objektumot kereshetően tartalmaz." if truncated else None,
         }
 
     def community_graph(self, analysis_id: str) -> dict[str, Any]:

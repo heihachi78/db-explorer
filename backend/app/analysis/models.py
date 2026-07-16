@@ -25,6 +25,7 @@ DEFAULT_EDGE_WEIGHTS = {
 @dataclass(frozen=True, slots=True)
 class AnalysisConfig:
     name: str
+    subgraph_id: str | None = None
     algorithm: Literal["LEIDEN"] = "LEIDEN"
     objective: Literal["CPM", "MODULARITY"] = "CPM"
     resolution: float = 1.0
@@ -52,6 +53,7 @@ class AnalysisConfig:
     def from_api(cls, value: dict) -> "AnalysisConfig":
         return cls(
             name=value["name"],
+            subgraph_id=value.get("subgraphId"),
             algorithm=value.get("algorithm", "LEIDEN"),
             objective=value.get("objective", "CPM"),
             resolution=float(value.get("resolution", 1.0)),
@@ -84,6 +86,7 @@ class AnalysisConfig:
     def to_api(self) -> dict:
         return {
             "name": self.name,
+            "subgraphId": self.subgraph_id,
             "algorithm": self.algorithm,
             "objective": self.objective,
             "resolution": self.resolution,

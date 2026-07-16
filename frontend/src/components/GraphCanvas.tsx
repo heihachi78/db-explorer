@@ -40,6 +40,10 @@ const TYPE_SHAPES: Record<string, cytoscape.Css.NodeShape> = {
 export function GraphCanvas({ nodes, edges, onSelectNode, onSelectEdge }: GraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<Core | null>(null);
+  const onSelectNodeRef = useRef(onSelectNode);
+  const onSelectEdgeRef = useRef(onSelectEdge);
+  onSelectNodeRef.current = onSelectNode;
+  onSelectEdgeRef.current = onSelectEdge;
 
   function exportView(format: ViewExportFormat) {
     if (graphRef.current && containerRef.current) {
@@ -139,11 +143,11 @@ export function GraphCanvas({ nodes, edges, onSelectNode, onSelectEdge }: GraphC
     });
     graph.on("tap", "node", (event: EventObject) => {
       const node = nodeMap.get(event.target.id());
-      if (node) onSelectNode(node);
+      if (node) onSelectNodeRef.current(node);
     });
     graph.on("tap", "edge", (event: EventObject) => {
       const edge = edgeMap.get(event.target.id());
-      if (edge) onSelectEdge(edge);
+      if (edge) onSelectEdgeRef.current(edge);
     });
     graph.on("mouseover", "node", (event: EventObject) => {
       event.target.addClass("hover-label");
@@ -172,7 +176,7 @@ export function GraphCanvas({ nodes, edges, onSelectNode, onSelectEdge }: GraphC
       graph.destroy();
       graphRef.current = null;
     };
-  }, [edges, nodes, onSelectEdge, onSelectNode]);
+  }, [edges, nodes]);
 
   return (
     <div className="graph-canvas-shell">

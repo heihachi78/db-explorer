@@ -10,6 +10,8 @@ class PublicConfig(BaseModel):
     oracleMode: str
     dataFilePresent: bool
     activeOperation: bool
+    datasetId: str | None = None
+    resetRequired: bool = False
     limits: dict[str, int]
 
 
@@ -134,6 +136,7 @@ class AnalysisRequest(BaseModel):
     hubPolicy: Literal["NONE", "DEGREE_NORMALIZATION", "EXCLUDE_TOP_HUBS"] = "DEGREE_NORMALIZATION"
     directionPolicy: Literal["SYMMETRIZE_SUM"] = "SYMMETRIZE_SUM"
     includeTechnicalObjects: bool = False
+    subgraphId: str | None = Field(default=None, min_length=1)
 
     @field_validator("name")
     @classmethod
@@ -147,6 +150,11 @@ class AnalysisRequest(BaseModel):
     @classmethod
     def unique_analysis_filters(cls, values: list[str]) -> list[str]:
         return list(dict.fromkeys(value.strip() for value in values if value.strip()))
+
+    @field_validator("subgraphId")
+    @classmethod
+    def clean_subgraph_id(cls, value: str | None) -> str | None:
+        return value.strip() if value else None
 
     @field_validator("iterations")
     @classmethod
@@ -269,3 +277,37 @@ class AnnotationPatchRequest(BaseModel):
 class ExportRequest(BaseModel):
     analysisId: str = Field(min_length=1)
     format: Literal["JSON", "CSV", "SVG", "PNG"]
+
+
+class NamedSubgraphRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    objectIds: list[str] = Field(min_length=1, max_length=500_000)
+    parentId: str | None = Field(default=None, min_length=1)
+
+    @field_validator("name")
+    @classmethod
+    def clean_subgraph_name(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("A részgráf neve nem lehet üres.")
+        return cleaned
+
+    @field_validator("objectIds")
+    @classmethod
+    def unique_object_ids(cls, values: list[str]) -> list[str]:
+        return list(dict.fromkeys(value.strip() for value in values if value.strip()))
+
+
+class CommunitySubgraphRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    analysisId: str = Field(min_length=1)
+    communityId: int = Field(ge=0)
+    parentId: str | None = Field(default=None, min_length=1)
+
+    @field_validator("name")
+    @classmethod
+    def clean_community_subgraph_name(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("A részgráf neve nem lehet üres.")
+        return cleaned

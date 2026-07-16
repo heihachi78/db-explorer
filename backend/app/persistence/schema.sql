@@ -63,6 +63,22 @@ CREATE TABLE IF NOT EXISTS object_details (
     PRIMARY KEY (object_id, detail_type)
 );
 
+CREATE TABLE IF NOT EXISTS named_subgraphs (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    parent_id TEXT REFERENCES named_subgraphs(id) ON DELETE SET NULL,
+    source_kind TEXT NOT NULL CHECK (source_kind IN ('COMPONENT_SELECTION', 'COMMUNITY')),
+    source_analysis_id TEXT,
+    source_community_id INTEGER,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS named_subgraph_membership (
+    subgraph_id TEXT NOT NULL REFERENCES named_subgraphs(id) ON DELETE CASCADE,
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    PRIMARY KEY (subgraph_id, object_id)
+);
+
 CREATE TABLE IF NOT EXISTS analysis_runs (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -178,3 +194,7 @@ CREATE INDEX IF NOT EXISTS idx_hierarchy_parent
     ON analysis_hierarchy(analysis_id, parent_id, hierarchy_id);
 CREATE INDEX IF NOT EXISTS idx_hierarchy_membership_object
     ON analysis_hierarchy_membership(analysis_id, object_id, hierarchy_id);
+CREATE INDEX IF NOT EXISTS idx_named_subgraphs_parent
+    ON named_subgraphs(parent_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_named_subgraph_membership_object
+    ON named_subgraph_membership(object_id, subgraph_id);

@@ -269,7 +269,10 @@ class OracleScanner:
                 self.counters["relationships"] = relationships
                 self.counters["externalObjects"] = external
                 summary = self._summary(writer, schemas, options, identity, started_at)
+                dataset_id = str(uuid.uuid4())
+                summary["datasetId"] = dataset_id
                 writer.set_meta("schema_version", 1)
+                writer.set_meta("dataset_id", dataset_id)
                 writer.set_meta("scan_summary", summary)
                 writer.set_meta("selected_schemas", list(schemas))
                 writer.commit()

@@ -8,6 +8,7 @@ from app.errors import AppError
 from app.oracle.connection import credentials_from_settings
 from app.oracle.scanner import OracleScanner, ScanCancelled, ScanOptions, load_scan_summary
 from app.persistence.export_repository import ExportRepository
+from app.persistence.database import database
 
 
 router = APIRouter(prefix="/scan", tags=["scan"])
@@ -35,6 +36,17 @@ def get_scan_summary(request: Request) -> dict:
 async def start_scan(payload: ScanRequest, request: Request) -> dict[str, bool]:
     settings = request.app.state.settings
     credentials = credentials_from_settings(settings)
+    if settings.database_path.exists():
+        with database(settings.database_path, read_only=True) as connection:
+            previous_scan = connection.execute(
+                "SELECT 1 FROM app_meta WHERE key = 'scan_summary'"
+            ).fetchone()
+        if previous_scan is not None:
+            raise AppError(
+                "WORKSPACE_RESET_REQUIRED",
+                "Új metaadatgyűjtés előtt indíts új felmérést a munkaterület törlésével.",
+                status_code=409,
+            )
     options = ScanOptions(
         schemas=tuple(payload.schemas),
         object_types=tuple(payload.objectTypes),

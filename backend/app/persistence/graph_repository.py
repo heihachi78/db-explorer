@@ -121,11 +121,32 @@ class GraphRepository:
             ).fetchone()
         return GraphNode.from_row(row) if row else None
 
-    def load_source_graph(self) -> tuple[list[GraphNode], list[GraphEdge]]:
+    def load_source_graph(self, subgraph_id: str | None = None) -> tuple[list[GraphNode], list[GraphEdge]]:
         """Load the normalized raw graph once for CPU-heavy analysis."""
         with database(self.path, read_only=True) as connection:
-            node_rows = connection.execute("SELECT * FROM objects ORDER BY id").fetchall()
-            edge_rows = connection.execute("SELECT * FROM relationships ORDER BY id").fetchall()
+            if subgraph_id:
+                node_rows = connection.execute(
+                    """
+                    SELECT o.* FROM objects o
+                    JOIN named_subgraph_membership nsm ON nsm.object_id = o.id
+                    WHERE nsm.subgraph_id = ? ORDER BY o.id
+                    """,
+                    (subgraph_id,),
+                ).fetchall()
+                edge_rows = connection.execute(
+                    """
+                    SELECT r.* FROM relationships r
+                    JOIN named_subgraph_membership s
+                      ON s.subgraph_id = ? AND s.object_id = r.source_id
+                    JOIN named_subgraph_membership t
+                      ON t.subgraph_id = ? AND t.object_id = r.target_id
+                    ORDER BY r.id
+                    """,
+                    (subgraph_id, subgraph_id),
+                ).fetchall()
+            else:
+                node_rows = connection.execute("SELECT * FROM objects ORDER BY id").fetchall()
+                edge_rows = connection.execute("SELECT * FROM relationships ORDER BY id").fetchall()
         return (
             [GraphNode.from_row(row) for row in node_rows],
             [GraphEdge.from_row(row) for row in edge_rows],
@@ -139,6 +160,7 @@ class GraphRepository:
         minimum_confidence: float,
         max_nodes: int,
         max_edges: int,
+        subgraph_id: str | None = None,
     ) -> dict[str, Any]:
         clauses = ["is_external = 0", "object_type NOT IN ('PACKAGE_BODY', 'TYPE_BODY')"]
         parameters: list[Any] = []
@@ -148,11 +170,16 @@ class GraphRepository:
         if owners:
             clauses.append(f"owner IN ({_placeholders(owners)})")
             parameters.extend(owners)
+        scope_clause = ""
+        scope_parameters: list[Any] = []
+        if subgraph_id:
+            scope_clause = " AND EXISTS (SELECT 1 FROM named_subgraph_membership nsm WHERE nsm.subgraph_id = ? AND nsm.object_id = objects.id)"
+            scope_parameters.append(subgraph_id)
         with database(self.path, read_only=True) as connection:
             row = connection.execute(
                 f"""
                 WITH eligible AS (
-                    SELECT id FROM objects WHERE {' AND '.join(clauses)}
+                    SELECT id FROM objects WHERE {' AND '.join(clauses)}{scope_clause}
                 )
                 SELECT
                     (SELECT COUNT(*) FROM eligible) AS node_count,
@@ -162,10 +189,10 @@ class GraphRepository:
                         JOIN eligible target ON target.id = relationship.target_id
                         WHERE relationship.confidence >= ?
                     ) AS relationship_count,
-                    (SELECT COUNT(*) FROM objects) AS source_node_count,
-                    (SELECT COUNT(*) FROM relationships) AS source_relationship_count
+                    (SELECT COUNT(*) FROM objects{(' WHERE EXISTS (SELECT 1 FROM named_subgraph_membership nsm WHERE nsm.subgraph_id = ? AND nsm.object_id = objects.id)') if subgraph_id else ''}) AS source_node_count,
+                    (SELECT COUNT(*) FROM relationships relationship{(' WHERE EXISTS (SELECT 1 FROM named_subgraph_membership s WHERE s.subgraph_id = ? AND s.object_id = relationship.source_id) AND EXISTS (SELECT 1 FROM named_subgraph_membership t WHERE t.subgraph_id = ? AND t.object_id = relationship.target_id)') if subgraph_id else ''}) AS source_relationship_count
                 """,
-                (*parameters, minimum_confidence),
+                (*parameters, *scope_parameters, minimum_confidence, *scope_parameters, *scope_parameters, *scope_parameters),
             ).fetchone()
         node_count = int(row["node_count"])
         relationship_count = int(row["relationship_count"])

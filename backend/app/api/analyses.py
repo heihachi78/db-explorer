@@ -1,10 +1,11 @@
 import asyncio
 import threading
 import uuid
+from typing import Annotated
 from dataclasses import replace
 
 import igraph
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, Query, Request, status
 
 from app.analysis.models import (
     TECHNICAL_OBJECT_TYPES,
@@ -26,6 +27,7 @@ from app.errors import AppError
 from app.persistence.analysis_repository import AnalysisRepository
 from app.persistence.graph_repository import GraphRepository
 from app.persistence.export_repository import ExportRepository
+from app.persistence.subgraph_repository import SubgraphRepository
 from app.tasks.models import TaskState
 
 
@@ -51,6 +53,7 @@ def _require_run(repository: AnalysisRepository, analysis_id: str) -> dict:
 def _config(payload: AnalysisRequest) -> AnalysisConfig:
     return AnalysisConfig(
         name=payload.name,
+        subgraph_id=payload.subgraphId,
         algorithm=payload.algorithm,
         objective=payload.objective,
         resolution=payload.resolution,
@@ -74,13 +77,19 @@ def _estimate(config: AnalysisConfig, request: Request) -> dict:
     object_types = set(config.object_types)
     if config.include_technical_objects:
         object_types.update(TECHNICAL_OBJECT_TYPES)
-    return GraphRepository(settings.database_path).estimate_analysis(
+    if config.subgraph_id and SubgraphRepository(settings.database_path).get(config.subgraph_id) is None:
+        raise AppError("SUBGRAPH_NOT_FOUND", "A kiválasztott részgráf nem található.", status_code=404)
+    estimate = GraphRepository(settings.database_path).estimate_analysis(
         object_types=tuple(sorted(object_types)),
         owners=config.owners,
         minimum_confidence=config.minimum_confidence,
         max_nodes=settings.analysis_max_nodes,
         max_edges=settings.analysis_max_edges,
+        subgraph_id=config.subgraph_id,
     )
+    if config.subgraph_id:
+        estimate["subgraph"] = SubgraphRepository(settings.database_path).get(config.subgraph_id)
+    return estimate
 
 
 async def _start_configs(
@@ -133,7 +142,7 @@ async def _start_configs(
                 )
                 if cancelled.is_set():
                     raise AnalysisCancelled("Analysis profile was cancelled.")
-                source_nodes, source_edges = service.graph_repository.load_source_graph()
+                source_nodes, source_edges = service.graph_repository.load_source_graph(configs[0].subgraph_id)
                 baseline_graph = build_analysis_graph(source_nodes, source_edges, configs[0])
                 comparison = compare_memberships(
                     [
@@ -245,7 +254,7 @@ def compare_analyses(payload: AnalysisCompareRequest, request: Request) -> dict:
         )
     source_nodes, source_edges = GraphRepository(
         request.app.state.settings.database_path
-    ).load_source_graph()
+    ).load_source_graph(AnalysisConfig.from_api(runs[0]["config"]).subgraph_id)
     baseline_graph = build_analysis_graph(
         source_nodes,
         source_edges,
@@ -332,6 +341,51 @@ def get_community(analysis_id: str, community_id: int, request: Request) -> dict
             details={"analysisId": analysis_id, "communityId": community_id},
         )
     return community
+
+
+@router.get("/{analysis_id}/communities/{community_id}/objects")
+def get_community_objects(
+    analysis_id: str,
+    community_id: int,
+    request: Request,
+    q: Annotated[str | None, Query(max_length=200)] = None,
+    owner: Annotated[str | None, Query(max_length=128)] = None,
+    object_type: Annotated[str | None, Query(alias="objectType", max_length=128)] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(alias="pageSize", ge=1, le=200)] = 50,
+) -> dict:
+    repository = _repository(request)
+    _require_run(repository, analysis_id)
+    result = repository.community_objects(
+        analysis_id,
+        community_id,
+        query=q.strip() if q else None,
+        owner=owner.strip() if owner else None,
+        object_type=object_type.strip() if object_type else None,
+        page=page,
+        page_size=page_size,
+    )
+    if result is None:
+        raise AppError("COMMUNITY_NOT_FOUND", "A kért közösség nem található.", status_code=404)
+    return result
+
+
+@router.get("/{analysis_id}/communities/{community_id}/subgraph")
+def get_community_subgraph(
+    analysis_id: str,
+    community_id: int,
+    request: Request,
+    max_nodes: Annotated[int, Query(alias="maxNodes", ge=1, le=10_000)] = 2_000,
+    max_edges: Annotated[int, Query(alias="maxEdges", ge=0, le=50_000)] = 10_000,
+) -> dict:
+    repository = _repository(request)
+    _require_run(repository, analysis_id)
+    result = repository.community_subgraph(
+        analysis_id, community_id, max_nodes=max_nodes, max_edges=max_edges
+    )
+    if result is None:
+        raise AppError("COMMUNITY_NOT_FOUND", "A kért közösség nem található.", status_code=404)
+    return result
 
 
 @router.get("/{analysis_id}/community-graph")

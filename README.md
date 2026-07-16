@@ -23,7 +23,7 @@ Helyben futó, egyfelhasználós alkalmazás Oracle adatbázis-objektumok és ka
    az adatbázis közös Docker-hálózaton fut, ezért az Oracle DSN gépneve
    `ora-db` legyen.
 
-4. Nyisd meg a [http://localhost:8000](http://localhost:8000) címet, futtasd a kapcsolatpróbát, válaszd ki a sémákat, majd indítsd el az adatgyűjtést.
+4. Nyisd meg a [http://localhost:8000](http://localhost:8000) címet. Meglévő felmérés esetén előbb használd az „Új felmérés · minden adat törlése” műveletet, majd futtasd a kapcsolatpróbát, válaszd ki a sémákat és indítsd el az adatgyűjtést.
 
 Az aktuális munkafájl a host `data/oracle_graph.db` fájlja. A scanner futás közben külön `oracle_graph.next.db` fájlt épít, és csak sikeres integritásellenőrzés után cseréli le atomikusan az aktuális adatot. A jelszó nem kerül bele az adatbázisba és API-válaszba.
 
@@ -77,11 +77,13 @@ cd frontend && npm test -- --run && npm run build
 - scan lefedettségi összesítő owner-, objektumtípus- és kapcsolattípus-számlálókkal;
 - megszakításbiztos staging pipeline, idegenkulcs- és endpoint-validálás, majd atomikus publikálás;
 - React/TypeScript kapcsolat-, séma- és opcionális objektumtípus-választó, scanállapot- és összesítő képernyő;
-- facettált objektumkereső, objektum- és kapcsolatrészlet API evidence adatokkal;
+- egygombos, atomikus munkaterület-reset, amely együtt törli a metaadatokat, részgráfokat, elemzéseket, annotációkat és exportokat, és új scan előtt kötelező, ha már van publikált felmérés;
+- facettált objektumkereső, objektum- és kapcsolatrészlet háttér-API evidence adatokkal;
 - irány-, kapcsolattípus- és confidence-szűrt, szerveroldalon limitált részgráf API;
 - ciklusbiztos dependents/dependencies hatáselemzés és hopszám- vagy súlyalapú útvonalkeresés;
-- Cytoscape gráfböngésző node/edge detail panellel, impact- és útvonalindítással, státusz-, kapcsolattípus-, confidence- és külsőobjektum-szűréssel;
-- a teljes publikált forrásgráf automatikus térképe gyengén összefüggő komponensekkel, fa/ciklusos/izolált szerkezeti jelöléssel, komponensméret- és tartalomszűréssel, valamint többes komponenskijelöléssel;
+- egyszerűsített Cytoscape gráfböngésző node/edge detail panellel és a természetes szerkezetre fókuszáló vezérlőkkel;
+- a teljes publikált forrásgráf automatikus térképe gyengén összefüggő komponensekkel, fa/ciklusos/izolált szerkezeti jelöléssel, komponensméret-, név-, séma- és típusszűréssel, valamint többes komponenskijelöléssel;
+- perzisztált, elnevezhető részgráfok szülő–gyermek eredettel; a közösségelemzés és annak méretbecslése kizárólag az aktív részgráf objektumaira és belső éleire fut;
 - objektumtípusonként eltérő node-alakok, jobb kattintásos pozíciórögzítés és újrafuttatható gráfelrendezés;
 - a pillanatnyi pan/zoomot és renderelt node-pozíciókat megőrző PNG-, illetve valódi vektoros SVG-nézetexport az objektumgráfból és a közösségi térképből;
 - külön raw és analysis gráfréteg, owner-/objektumtípus-/confidence-szűréssel és package spec/body elemzési összevonással;
@@ -92,10 +94,12 @@ cd frontend && npm test -- --run && npm run build
 - PageRank, weighted strength, in/out degree, betweenness, articulation point, bridge edge és k-core mutatók;
 - atomikusan mentett, megszakítható és újra lekérdezhető elemzési futások, közösségi drill-down és aggregált community graph API;
 - konfigurálható scan-időkorlát, elemzési node/edge hard limit, kontrollált memóriahiba és futás előtti közelítő méret-/memóriabecslés;
-- böngészős Leiden-indítás, resolution profil, futáslista, megszakítás/törlés és közösségi eredménytábla;
+- böngészős Leiden-indítás ésszerű modularity alapprofillal, részgráfonként szűrt futáslista, minden korábbi futás teljes paraméterkészlete, megszakítás/törlés és közösségi eredménytábla;
 - ötfutásos seed-stabilitásprofil Adjusted Rand Index, NMI, Variation of Information, node-szintű együttklaszterezési stabilitás és dokumentált közösségcímkék számításával;
 - automatikus közösségnév-javaslat domináns séma, névtokenek és központi TABLE/PACKAGE alapján, magyarázattal és helyi elemzői annotációval;
 - interaktív, összecsukott community map, schema–community mátrix, conductance-rangsor, top hub/bridge és „Miért került ide?” nézet;
+- közösségenként kereshető, lapozható objektumlista sémával, típussal, státusszal és centralitással, valamint csak a közösség node-jait és belső éleit mutató gráf;
+- bármely közösség elnevezett gyermek-részgráffá alakítása és azon újabb közösségelemzés indítása;
 - kísérleti hierarchikus közösségelemzés alacsony alap-resolutionnel, méretküszöb feletti rekurzív újrafelosztással, determinisztikus szülő–gyermek útvonalakkal, szülőnkénti resolution-felülírással, mélység- és közösségszám-limittel;
 - perzisztált, összecsukható hierarchiafa helyi közösségmutatókkal és objektum-drill-downnal; a levéltagság egyszer tárolódik, a szülők tartalma leszármazotti lekérdezéssel áll elő;
 - kijelölt futások összehasonlító táblája és resolution-görbéje, valamint címkefüggetlen particionálási egyezésmutatók;
@@ -105,13 +109,14 @@ cd frontend && npm test -- --run && npm run build
 
 ## Elemzői munkafolyamat
 
-1. A „Teljes térkép” nézetben ellenőrizd, hány összefüggő komponensre bomlik a publikált objektumhalmaz. Szűrj komponensméretre, fa/ciklusos/izolált szerkezetre vagy névre, majd jelölj ki egy vagy több komponenst részletes vizsgálatra.
-2. Indíts egy önálló Leiden-futást, egy hatpontos resolution-profilt vagy az öt seedből álló stabilitásprofilt.
-3. Jelölj ki legalább két sikeres futást a futáslistában, majd hasonlítsd össze a paramétereket, a közösségszámot, quality/conductance értékeket, valamint az ARI/NMI/VI egyezést.
-4. Nyiss meg egy futást, és használd a community mapet, a schema–community mátrixot és a legjobb/legrosszabb conductance listát. A közösségre kattintva megjelenik a névjavaslat indoklása, a top hubok és bridge-ek.
-5. A „Kísérleti hierarchia” beállításaiban alacsony alap-resolutionnel indíthatsz rekurzív felosztást. A ponttal tagolt útvonalakhoz (`0`, `0.2`) külön resolution adható; a mélység- és közösségszám-limit védi a futást a túlzott felbontástól. Az eredményfa ágainak helyi mutatói és objektumai külön megnyithatók.
-6. A javasolt nevet helyi címkével és elemzői megjegyzéssel írhatod felül. Ezek az aktuális SQLite-adathalmazhoz tartoznak, új scan után nem öröklődnek tovább.
-7. A JSON export a konfigurációt, node-okat, kapcsolatokat, tagságokat és mutatókat együtt tartalmazza; a CSV ZIP külön táblákat ad, hierarchikus futásnál `hierarchy.csv` és `hierarchy_memberships.csv` fájlokkal. A futásexport SVG/PNG formátuma determinisztikus aggregált közösségi térképet készít. A gráfok saját „Aktuális nézet” gombjai ezzel szemben pontosan a pillanatnyi interaktív pan/zoomot és node-pozíciókat mentik. Új export indításakor a korábbi export törlődik.
+1. Meglévő adatok esetén indíts új felmérést az egygombos resettel; ezután a teljes felület üres alapállapotból indul.
+2. Ellenőrizd a kapcsolatot, válaszd ki a sémákat és objektumtípusokat, majd futtasd a metaadatgyűjtést.
+3. A természetes gráftérképen szűrj minimum komponensméretre, névre, sémára, objektumtípusra vagy fa/ciklusos/izolált szerkezetre. Jelölj ki egy vagy több összefüggő komponenst, és szükség szerint csak egyet jeleníts meg vagy nagyíts ki.
+4. Nevezd el és mentsd a kijelölt komponenseket részgráfként. Ettől kezdve a futások, becslések és eredmények kizárólag az aktív részgráfhoz tartoznak.
+5. Indíts Leiden-futást az alapértelmezett modularity profillal, vagy módosítsd a resolutiont, seedet, confidence-küszöböt, hub policyt és élsúlyokat. A futáslista minden mentett paramétert megmutat.
+6. Nyiss meg egy közösséget; a részletes, kereshető listában ellenőrizd a sémákat, objektumokat, típusokat, státuszokat és centralitásokat, a közösségi belső gráfon pedig ezek kapcsolatait.
+7. Ha egy közösséget tovább akarsz bontani, nevezd el és mentsd gyermek-részgráfként, aktiváld, majd ismételd meg rajta az elemzést. Ez tetszőleges mélységben ismételhető.
+8. Szükség esetén hasonlíts össze azonos részgráfhoz tartozó futásokat, adj elemzői címkét vagy megjegyzést, és exportáld az eredményt.
 
 A stabilitási címke alapértelmezett küszöbei: `STABLE ≥ 0,80`, `MIXED ≥ 0,55`, ez alatt `UNSTABLE`. A node-pontszám legfeljebb tíz, az elemzési gráfban megmaradó fő szomszéddal való együttklaszterezés gyakorisága a seed-futások között.
 
@@ -119,6 +124,6 @@ A stabilitási címke alapértelmezett küszöbei: `STABLE ≥ 0,80`, `MIXED ≥
 
 A karcsúsított terv funkcionális követelményei elkészültek. A 2026-07-15-i átadási próbán a production Docker image üres adatkönyvtárból indult, Oracle 23.26.2 adatbázishoz read-only módban kapcsolódott, majd a kapcsolat → többsémás scan → kontrollminta → Leiden-elemzés → JSON-export folyamat sikeresen végigfutott. A próba 740 objektumot és 924 forráskapcsolatot gyűjtött; az elemzés 502 csomóponton és 302 aggregált élen 305 közösséget készített.
 
-Az automatikus regresszió 46 backend- és 14 frontendtesztből áll; a frontend production build és a Docker image buildje is sikeres. Más céladatbázis használatakor a kézi kontrollminta megismétlése továbbra is a felmérés része, nem külön fejlesztési vagy üzemeltetési projekt. Golden Oracle-környezet, általános nagygráf-benchmark, tartós fájllog és vállalati üzemeltetési réteg nem része a scope-nak.
+Az automatikus regresszió 48 backend- és 17 frontendtesztből áll; a frontend production buildje sikeres. Más céladatbázis használatakor a kézi kontrollminta megismétlése továbbra is a felmérés része, nem külön fejlesztési vagy üzemeltetési projekt. Golden Oracle-környezet, általános nagygráf-benchmark, tartós fájllog és vállalati üzemeltetési réteg nem része a scope-nak.
 
 Részletes terv: [oracle-adatbazis-graf-megvalositasi-terv.md](oracle-adatbazis-graf-megvalositasi-terv.md)

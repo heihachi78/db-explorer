@@ -3,6 +3,8 @@ export interface PublicConfig {
   oracleMode: "thin" | "thick";
   dataFilePresent: boolean;
   activeOperation: boolean;
+  datasetId: string | null;
+  resetRequired: boolean;
   limits: Record<string, number>;
 }
 
@@ -33,6 +35,7 @@ export interface ScanStatus {
 }
 
 export interface ScanSummary {
+  datasetId?: string;
   databaseName: string;
   containerName: string;
   selectedSchemas: string[];
@@ -91,11 +94,23 @@ export interface ObjectSearchResult {
 }
 
 export interface SubgraphResult {
-  rootObjectIds: string[];
+  rootObjectIds?: string[];
   nodes: GraphNode[];
   edges: GraphEdge[];
   truncated: boolean;
   suggestion: string | null;
+}
+
+export interface NamedSubgraph {
+  id: string;
+  name: string;
+  parentId: string | null;
+  sourceKind: "COMPONENT_SELECTION" | "COMMUNITY";
+  sourceAnalysisId: string | null;
+  sourceCommunityId: number | null;
+  createdAt: string;
+  nodeCount: number;
+  edgeCount: number;
 }
 
 export interface GraphComponent {
@@ -239,6 +254,17 @@ export interface CommunityDetail {
   annotation: Annotation | null;
 }
 
+export interface CommunityObjectResult {
+  items: Array<GraphNode & {
+    stability: number | null;
+    centrality: Record<string, number>;
+  }>;
+  total: number;
+  page: number;
+  pageSize: number;
+  facets: { owners: Record<string, number>; objectTypes: Record<string, number> };
+}
+
 export interface CommunityGraph {
   nodes: CommunityMetrics[];
   edges: Array<{
@@ -375,6 +401,26 @@ export const api = {
     body: JSON.stringify({ schemas, objectTypes }),
   }),
   cancelScan: () => request<{ accepted: boolean }>("/scan/cancel", { method: "POST" }),
+  resetWorkspace: () => request<{ reset: boolean; resetAt: string; datasetId: null }>(
+    "/workspace/reset", { method: "POST" },
+  ),
+  subgraphs: async () => {
+    const result = await request<{ items?: NamedSubgraph[] }>("/subgraphs");
+    return result.items ?? [];
+  },
+  createSubgraph: (payload: { name: string; objectIds: string[]; parentId?: string | null }) =>
+    request<NamedSubgraph>("/subgraphs", { method: "POST", body: JSON.stringify(payload) }),
+  createSubgraphFromCommunity: (payload: {
+    name: string; analysisId: string; communityId: number; parentId?: string | null;
+  }) => request<NamedSubgraph>("/subgraphs/from-community", {
+    method: "POST", body: JSON.stringify(payload),
+  }),
+  subgraphGraph: (subgraphId: string) => request<SubgraphResult>(
+    `/subgraphs/${encodeURIComponent(subgraphId)}/graph`,
+  ),
+  deleteSubgraph: (subgraphId: string) => request<{ deleted: boolean }>(
+    `/subgraphs/${encodeURIComponent(subgraphId)}`, { method: "DELETE" },
+  ),
   searchObjects: (parameters: {
     q?: string;
     owner?: string;
@@ -448,6 +494,7 @@ export const api = {
     hubPolicy: "NONE" | "DEGREE_NORMALIZATION" | "EXCLUDE_TOP_HUBS";
     includeTechnicalObjects: boolean;
     edgeWeights: Record<string, number>;
+    subgraphId?: string;
   }) => request<{ accepted: boolean; analysisId: string }>("/analyses", {
     method: "POST",
     body: JSON.stringify(payload),
@@ -461,6 +508,7 @@ export const api = {
     hubPolicy: "NONE" | "DEGREE_NORMALIZATION" | "EXCLUDE_TOP_HUBS";
     includeTechnicalObjects: boolean;
     edgeWeights: Record<string, number>;
+    subgraphId?: string;
   }) => request<AnalysisEstimate>("/analyses/estimate", {
     method: "POST",
     body: JSON.stringify(payload),
@@ -473,6 +521,7 @@ export const api = {
     hubPolicy: "NONE" | "DEGREE_NORMALIZATION" | "EXCLUDE_TOP_HUBS";
     includeTechnicalObjects: boolean;
     edgeWeights: Record<string, number>;
+    subgraphId?: string;
   }) => request<{ accepted: boolean; analysisIds: string[] }>(
     "/analyses/resolution-profile",
     { method: "POST", body: JSON.stringify(payload) },
@@ -485,6 +534,7 @@ export const api = {
     hubPolicy: "NONE" | "DEGREE_NORMALIZATION" | "EXCLUDE_TOP_HUBS";
     includeTechnicalObjects: boolean;
     edgeWeights: Record<string, number>;
+    subgraphId?: string;
   }) => request<{ accepted: boolean; analysisIds: string[]; baselineAnalysisId: string }>(
     "/analyses/seed-profile",
     { method: "POST", body: JSON.stringify(payload) },
@@ -503,6 +553,7 @@ export const api = {
     hierarchyMaxDepth: number;
     hierarchyMaxCommunities: number;
     hierarchyResolutionOverrides: Record<string, number>;
+    subgraphId?: string;
   }) => request<{ accepted: boolean; analysisId: string; experimental: true }>(
     "/analyses/hierarchy",
     { method: "POST", body: JSON.stringify(payload) },
@@ -525,6 +576,20 @@ export const api = {
   },
   community: (analysisId: string, communityId: number) => request<CommunityDetail>(
     `/analyses/${analysisId}/communities/${communityId}`,
+  ),
+  communityObjects: (analysisId: string, communityId: number, parameters: {
+    q?: string; owner?: string; objectType?: string; page?: number; pageSize?: number;
+  }) => {
+    const query = new URLSearchParams();
+    Object.entries(parameters).forEach(([key, value]) => {
+      if (value !== undefined && value !== "") query.set(key, String(value));
+    });
+    return request<CommunityObjectResult>(
+      `/analyses/${analysisId}/communities/${communityId}/objects?${query}`,
+    );
+  },
+  communitySubgraph: (analysisId: string, communityId: number) => request<SubgraphResult>(
+    `/analyses/${analysisId}/communities/${communityId}/subgraph`,
   ),
   communityGraph: (analysisId: string) => request<CommunityGraph>(
     `/analyses/${analysisId}/community-graph`,

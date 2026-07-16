@@ -10,10 +10,12 @@ export function CommunityGraphCanvas({
   onSelectCommunity,
 }: {
   graph: CommunityGraph;
-  onSelectCommunity: (communityId: number) => void;
+  onSelectCommunity?: (communityId: number) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<Core | null>(null);
+  const onSelectCommunityRef = useRef(onSelectCommunity);
+  onSelectCommunityRef.current = onSelectCommunity;
 
   function rerunLayout() {
     graphRef.current?.layout({ name: "cose", animate: false, fit: true, padding: 45 }).run();
@@ -36,7 +38,7 @@ export function CommunityGraphCanvas({
           data: {
             id: `community-${community.communityId}`,
             communityId: community.communityId,
-            label: community.annotation?.name ?? community.suggestedName,
+            label: `${community.annotation?.name ?? community.suggestedName}\n${community.nodeCount} objektum`,
             nodeCount: community.nodeCount,
             size: Math.max(38, Math.min(92, 28 + Math.sqrt(community.nodeCount) * 8)),
             schema: community.dominantSchema,
@@ -81,15 +83,17 @@ export function CommunityGraphCanvas({
       minZoom: 0.2,
       maxZoom: 3,
     });
-    instance.on("tap", "node", (event: EventObject) => {
-      onSelectCommunity(Number(event.target.data("communityId")));
-    });
+    if (onSelectCommunityRef.current) {
+      instance.on("tap", "node", (event: EventObject) => {
+        onSelectCommunityRef.current?.(Number(event.target.data("communityId")));
+      });
+    }
     graphRef.current = instance;
     return () => {
       instance.destroy();
       graphRef.current = null;
     };
-  }, [graph, onSelectCommunity]);
+  }, [graph]);
 
   return (
     <div className="community-map-wrap">

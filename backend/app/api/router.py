@@ -7,6 +7,8 @@ from .connection import router as connection_router
 from .graph import router as graph_router
 from .exports import router as exports_router
 from .scan import router as scan_router
+from .subgraphs import router as subgraphs_router
+from .workspace import router as workspace_router
 
 
 api_router = APIRouter(prefix="/api")
@@ -17,6 +19,8 @@ api_router.include_router(graph_router)
 api_router.include_router(analyses_router)
 api_router.include_router(annotations_router)
 api_router.include_router(exports_router)
+api_router.include_router(subgraphs_router)
+api_router.include_router(workspace_router)
 
 
 @api_router.get("/health", tags=["health"])

@@ -64,7 +64,7 @@ class AnalysisService:
         if not self.analysis_repository.mark_running(analysis_id):
             raise AnalysisCancelled("Analysis was cancelled before it started.")
         report(TaskState.PREPARING_ANALYSIS, message="Loading and preprocessing the source graph.")
-        source_nodes, source_edges = self.graph_repository.load_source_graph()
+        source_nodes, source_edges = self.graph_repository.load_source_graph(config.subgraph_id)
         self._check_cancelled(cancelled)
         graph = build_analysis_graph(source_nodes, source_edges, config)
         if not graph.nodes:
